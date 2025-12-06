@@ -1,0 +1,31 @@
+Calculating task graph as configuration cache cannot be reused because the file system entry '.git' has been removed.
+
+FAILURE: Build failed with an exception.
+
+* Where:
+Settings file 'D:\ASAS\minecraft_server\papermc_modificado\Paper\settings.gradle.kts' line: 29
+
+* What went wrong:
+
+=====================[ ERROR ]=====================
+ The Paper project directory is not a properly cloned Git repository.
+ 
+ In order to build Paper from source you must clone
+ the Paper repository using Git, not download a code
+ zip from GitHub.
+ 
+ Built Paper jars are available for download at
+ https://papermc.io/downloads/paper
+ 
+ See https://github.com/PaperMC/Paper/blob/main/CONTRIBUTING.md
+ for further information on building and modifying Paper.
+===================================================
+
+* Try:
+> Run with --stacktrace option to get the stack trace.
+> Run with --info or --debug option to get more log output.
+> Run with --scan to generate a Build Scan (Powered by Develocity).
+> Get more help at https://help.gradle.org.
+
+BUILD FAILED in 1s
+Configuration cache entry stored.
