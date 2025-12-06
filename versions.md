@@ -1,4 +1,4 @@
-# Paper Changelog
+# TurboMC Changelog
 
 ## v1.0.0 - LZ4 Compression Support
 
