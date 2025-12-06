@@ -224,6 +224,7 @@ tasks.compileTestJava {
 // Bump compile tasks to 1GB memory to avoid OOMs
 tasks.withType<JavaCompile>().configureEach {
     options.forkOptions.memoryMaximumSize = "1G"
+    options.compilerArgs.add("--add-modules=jdk.incubator.vector")
 }
 
 val scanJarForBadCalls by tasks.registering(io.papermc.paperweight.tasks.ScanJarForBadCalls::class) {
@@ -261,6 +262,7 @@ tasks.test {
     val provider = objects.newInstance<MockitoAgentProvider>()
     provider.fileCollection.from(mockitoAgent)
     jvmArgumentProviders.add(provider)
+    jvmArgs("--add-modules=jdk.incubator.vector")
 }
 
 val generatedDir: java.nio.file.Path = layout.projectDirectory.dir("src/generated/java").asFile.toPath()
@@ -292,6 +294,7 @@ fun TaskContainer.registerRunTask(
         vendor.set(JvmVendorSpec.JETBRAINS)
     })
     jvmArgs("-XX:+AllowEnhancedClassRedefinition")
+    jvmArgs("--add-modules=jdk.incubator.vector")
 
     if (rootProject.childProjects["test-plugin"] != null) {
         val testPluginJar = rootProject.project(":test-plugin").tasks.jar.flatMap { it.archiveFile }
@@ -371,3 +374,9 @@ fill {
         }
     }
 }
+
+// Fix for missing task dependency reported by Gradle 9+
+tasks.named("processResources") {
+    dependsOn("applyResourcePatches")
+}
+
