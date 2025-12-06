@@ -35,7 +35,7 @@ public class PaperVersionFetcher implements VersionFetcher {
     private static final Logger LOGGER = LogUtils.getClassLogger();
     private static final int DISTANCE_ERROR = -1;
     private static final int DISTANCE_UNKNOWN = -2;
-    private static final String DOWNLOAD_PAGE = "https://papermc.io/downloads/paper";
+    private static final String DOWNLOAD_PAGE = "https://github.com/janxhg/TurboMC";
 
     @Override
     public long getCacheTime() {
@@ -49,7 +49,7 @@ public class PaperVersionFetcher implements VersionFetcher {
         if (build.buildNumber().isEmpty() && build.gitCommit().isEmpty()) {
             updateMessage = text("You are running a development version without access to version information", color(0xFF5300));
         } else {
-            updateMessage = getUpdateStatusMessage("PaperMC/Paper", build);
+            updateMessage = getUpdateStatusMessage("janxhg/TurboMC", build);
         }
         final @Nullable Component history = this.getHistory();
 
@@ -72,7 +72,7 @@ public class PaperVersionFetcher implements VersionFetcher {
 
         return switch (distance) {
             case DISTANCE_ERROR -> text("Error obtaining version information", NamedTextColor.YELLOW);
-            case 0 -> text("You are running the latest version", NamedTextColor.GREEN);
+            case 0 -> text("You are running the latest version of TurboMC", NamedTextColor.GREEN);
             case DISTANCE_UNKNOWN -> text("Unknown version", NamedTextColor.YELLOW);
             default -> text("You are " + distance + " version(s) behind", NamedTextColor.YELLOW)
                 .append(Component.newline())
