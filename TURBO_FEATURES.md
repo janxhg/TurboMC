@@ -18,7 +18,7 @@ Replaces the standard Zlib compression for proxy connections with **LZ4**, desig
 ### ☕ Java Platform
 *   **Native Java 21**: Fully optimized for **JDK 21**, ensuring compatibility with the latest Generational ZGC and Vector API features.
 
----
+
 
 ## ⚙️ Configuration
 
@@ -33,7 +33,7 @@ proxies:
 ```
 *Note: The native LZ4 compression is automatically negotiated when connecting via TurboProxy.*
 
----
+
 
 ## 📝 Version Summary
 

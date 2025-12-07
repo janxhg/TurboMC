@@ -1,31 +1,57 @@
-Calculating task graph as configuration cache cannot be reused because the file system entry '.git' has been removed.
+Reusing configuration cache.
+> Task :paper-server:processLog4jPluginsResources NO-SOURCE
+> Task :paper-api:processResources NO-SOURCE
+> Task :paper-server:cloneSpigotBuildData UP-TO-DATE
+> Task :paper-api:generateApiVersioningFile UP-TO-DATE
+> Task :paper-server:unpackSpigotBuildData UP-TO-DATE
+> Task :paper-api:compileJava UP-TO-DATE
+> Task :paper-api:classes UP-TO-DATE
+> Task :paper-api:jar UP-TO-DATE
+> Task :paper-server:compileLog4jPluginsJava UP-TO-DATE
+> Task :paper-server:log4jPluginsClasses UP-TO-DATE
+> Task :paper-server:downloadMcManifest
+> Task :paper-server:downloadMcVersionManifest UP-TO-DATE
+> Task :paper-server:downloadServerJar UP-TO-DATE
+> Task :paper-server:downloadMappings UP-TO-DATE
+> Task :paper-server:extractFromBundler UP-TO-DATE
+> Task :paper-server:setupMacheResources UP-TO-DATE
+> Task :paper-server:filterVanillaJar UP-TO-DATE
+> Task :paper-server:compileJava UP-TO-DATE
+> Task :paper-server:generateMappings UP-TO-DATE
+> Task :paper-server:generateSpigotMappings UP-TO-DATE
+> Task :paper-server:spigotRemapJar UP-TO-DATE
+> Task :paper-server:cleanupMappings UP-TO-DATE
+> Task :paper-server:patchMappings UP-TO-DATE
+> Task :paper-server:extractMacheResources UP-TO-DATE
+> Task :paper-server:applyResourcePatches
+Applied 6 patches
+
+> Task :paper-server:processResources UP-TO-DATE
+> Task :paper-server:classes UP-TO-DATE
+> Task :paper-server:jar UP-TO-DATE
+> Task :paper-server:fixJarForReobf UP-TO-DATE
+> Task :paper-server:generateReobfMappings UP-TO-DATE
+> Task :paper-server:patchReobfMappings UP-TO-DATE
+> Task :paper-server:generateRelocatedReobfMappings UP-TO-DATE
+> Task :paper-server:includeMappings UP-TO-DATE
+> Task :paper-server:relocateConstants UP-TO-DATE
+> Task :paper-server:reobfJar FAILED
 
 FAILURE: Build failed with an exception.
 
-* Where:
-Settings file 'D:\ASAS\minecraft_server\papermc_modificado\Paper\settings.gradle.kts' line: 29
-
 * What went wrong:
+Execution failed for task ':paper-server:reobfJar'.
+> io.papermc.paperweight.PaperweightException: Reobfuscated server jars are no longer supported and only exist for debugging purposes.
+  If you are attempting to build a paperclip or bundler jar, use the 'mojmap' variant instead of 'reobf'.
+  Enable paperweight debug mode to bypass this error.
 
-=====================[ ERROR ]=====================
- The Paper project directory is not a properly cloned Git repository.
- 
- In order to build Paper from source you must clone
- the Paper repository using Git, not download a code
- zip from GitHub.
- 
- Built Paper jars are available for download at
- https://papermc.io/downloads/paper
- 
- See https://github.com/PaperMC/Paper/blob/main/CONTRIBUTING.md
- for further information on building and modifying Paper.
-===================================================
 
 * Try:
 > Run with --stacktrace option to get the stack trace.
 > Run with --info or --debug option to get more log output.
+30 actionable tasks: 3 executed, 27 up-to-date
+Configuration cache entry reused.
 > Run with --scan to generate a Build Scan (Powered by Develocity).
 > Get more help at https://help.gradle.org.
 
-BUILD FAILED in 1s
-Configuration cache entry stored.
+BUILD FAILED in 57s
