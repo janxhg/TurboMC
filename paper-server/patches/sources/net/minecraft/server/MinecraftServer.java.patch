@@ -750,7 +750,7 @@
      protected void runServer() {
          try {
              if (!this.initServer()) {
-@@ -737,26 +_,68 @@
+@@ -737,26 +_,69 @@
              }
  
              this.nextTickTimeNanos = Util.getNanos();
@@ -758,6 +758,7 @@
              this.statusIcon = this.loadStatusIcon().orElse(null);
              this.status = this.buildServerStatus();
  
++            com.turbomc.via.TurboViaLoader.init(this.server.getWorldContainer()); // TurboMC
 +            this.server.spark.enableBeforePlugins(); // Paper - spark
 +            // Spigot start
 +            // Paper start

@@ -39,6 +39,6 @@ proxies:
 
 | Version | Codename | Main Changes |
 | :--- | :--- | :--- |
-| **1.2.0** | *Protocol Update* | Protocol 773 Support for latest Minecraft versions. |
+| **1.2.0** | *Protocol Update* | **Native Multi-Version Support** (1.21.x + Older via ViaVersion). |
 | **1.1.0** | *Vector Speed* | SIMD Collision Optimization (Vector API). |
 | **1.0.0** | *Genesis* | Initial fork, Native LZ4 Compression (replacing Zlib). |

@@ -13,10 +13,19 @@ plugins {
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 
+repositories {
+    mavenCentral()
+    maven("https://repo.viaversion.com")
+}
+
 dependencies {
     mache("io.papermc:mache:1.21.10+build.9")
     paperclip("io.papermc:paperclip:3.0.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    
+    // TurboMC - ViaVersion
+    implementation("com.viaversion:viaversion-common:5.1.1")
+    implementation("com.viaversion:viabackwards-common:5.1.1")
 }
 
 paperweight {
@@ -46,6 +55,7 @@ tasks.generateDevelopmentBundle {
     libraryRepositories.addAll(
         "https://repo.maven.apache.org/maven2/",
         paperMavenPublicUrl,
+        "https://repo.viaversion.com"
     )
 }
 

@@ -41,6 +41,9 @@ Implemented Single Instruction, Multiple Data (SIMD) optimization for AABB colli
 Added support for Minecraft protocol version 773 (1.21.9-1.21.10) with multi-version compatibility. Clients using Minecraft 1.21 through 1.21.10 (protocols 767-773) can now connect to TurboMC servers seamlessly.
 
 ### Technical Details
+### TurboMC 1.2.0
+- **Native Multi-Version Support**: Integrated ViaVersion, ViaBackwards, and ViaRewind directly into the server core.
+- **Protocol Support**: Native 1.21.10 support, with backward compatibility for older clients.
 - **Multi-Version Protocol**: Server accepts client protocols 767-773 (Minecraft 1.21 through 1.21.10).
 - **Backward Compatibility**: All 1.21.x clients are supported without "Outdated client" errors.
 - **TurboProxy Integration**: Optimized for use with TurboProxy for high-performance connections.
