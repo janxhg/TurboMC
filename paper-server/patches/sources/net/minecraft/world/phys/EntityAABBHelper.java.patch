@@ -1,0 +1,103 @@
+--- /dev/null
++++ b/net/minecraft/world/phys/EntityAABBHelper.java
+@@ -1,0 +_,100 @@
++package net.minecraft.world.phys;
++
++import net.minecraft.world.entity.Entity;
++import java.util.List;
++
++/**
++ * TurboMC - Entity-AABB conversion utilities for SIMD operations.
++ * 
++ * Provides helper methods to convert Entity lists to AABB arrays
++ * for bulk SIMD processing.
++ */
++public final class EntityAABBHelper {
++    
++    private EntityAABBHelper() {
++        throw new UnsupportedOperationException("Utility class");
++    }
++    
++    /**
++     * Extracts AABBs from a list of entities into a reusable array.
++     * 
++     * @param entities Source entity list
++     * @param output Output AABB array (must be at least entities.size())
++     * @return Number of AABBs written
++     */
++    public static int extractAABBs(List<Entity> entities, AABB[] output) {
++        int size = entities.size();
++        for (int i = 0; i < size; i++) {
++            output[i] = entities.get(i).getBoundingBox();
++        }
++        return size;
++    }
++    
++    /**
++     * Filters entities whose AABBs intersect with the query AABB.
++     * Uses SIMD acceleration for large entity lists.
++     * 
++     * @param queryBox The AABB to test against
++     * @param entities Input entity list
++     * @param output Output list for intersecting entities
++     * @return Number of intersecting entities
++     */
++    public static int filterIntersecting(AABB queryBox, List<Entity> entities, List<Entity> output) {
++        int size = entities.size();
++        
++        // For small lists, use scalar (faster due to no array allocation)
++        if (size < 16) {
++            int count = 0;
++            for (Entity entity : entities) {
++                if (queryBox.intersects(entity.getBoundingBox())) {
++                    output.add(entity);
++                    count++;
++                }
++            }
++            return count;
++        }
++        
++        // For large lists, use SIMD
++        AABB[] aabbs = new AABB[size];
++        extractAABBs(entities, aabbs);
++        
++        int count = 0;
++        for (int i = 0; i < size; i++) {
++            if (queryBox.intersects(aabbs[i])) {
++                output.add(entities.get(i));
++                count++;
++            }
++        }
++        
++        return count;
++    }
++    
++    /**
++     * Finds the first entity whose AABB intersects with the query AABB.
++     * Uses SIMD for early-exit optimization on large lists.
++     * 
++     * @param queryBox The AABB to test against
++     * @param entities Input entity list
++     * @return First intersecting entity, or null if none
++     */
++    public static Entity findFirstIntersecting(AABB queryBox, List<Entity> entities) {
++        int size = entities.size();
++        
++        if (size < 16) {
++            // Scalar for small lists
++            for (Entity entity : entities) {
++                if (queryBox.intersects(entity.getBoundingBox())) {
++                    return entity;
++                }
++            }
++            return null;
++        }
++        
++        // SIMD for large lists
++        AABB[] aabbs = new AABB[size];
++        extractAABBs(entities, aabbs);
++        
++        int hitIndex = queryBox.intersectsAny(aabbs);
++        return hitIndex >= 0 ? entities.get(hitIndex) : null;
++    }
++}

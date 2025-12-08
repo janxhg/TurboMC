@@ -1,0 +1,211 @@
+--- /dev/null
++++ b/net/minecraft/world/phys/AABBVectorOps.java
+@@ -1,0 +_,208 @@
++package net.minecraft.world.phys;
++
++import jdk.incubator.vector.DoubleVector;
++import jdk.incubator.vector.VectorMask;
++import jdk.incubator.vector.VectorSpecies;
++
++/**
++ * TurboMC - SIMD-accelerated AABB operations using Java Vector API.
++ * 
++ * This class provides vectorized bulk operations for collision detection,
++ * leveraging AVX2/AVX-512 instructions when available.
++ */
++public final class AABBVectorOps {
++    
++    // Use PREFERRED species for automatic CPU detection (AVX2 on modern CPUs, SSE2 fallback)
++    private static final VectorSpecies<Double> SPECIES = DoubleVector.SPECIES_PREFERRED;
++    private static final int LANES = SPECIES.length(); // 4 on AVX2, 2 on SSE2
++    
++    // Minimum batch size to justify SIMD overhead
++    private static final int MIN_SIMD_BATCH = 8;
++    
++    private AABBVectorOps() {
++        throw new UnsupportedOperationException("Utility class");
++    }
++    
++    /**
++     * Tests if this AABB intersects with ANY of the candidate AABBs.
++     * Uses SIMD to process multiple candidates in parallel.
++     * 
++     * @param self The AABB to test
++     * @param candidates Array of candidate AABBs
++     * @param offset Starting index in candidates array
++     * @param length Number of candidates to test
++     * @return Index of first intersecting AABB, or -1 if none intersect
++     */
++    public static int intersectsAny(AABB self, AABB[] candidates, int offset, int length) {
++        if (length < MIN_SIMD_BATCH) {
++            // Fallback to scalar for small batches
++            return intersectsAnyScalar(self, candidates, offset, length);
++        }
++        
++        // Broadcast this AABB's bounds to vectors
++        final DoubleVector selfMinX = DoubleVector.broadcast(SPECIES, self.minX);
++        final DoubleVector selfMaxX = DoubleVector.broadcast(SPECIES, self.maxX);
++        final DoubleVector selfMinY = DoubleVector.broadcast(SPECIES, self.minY);
++        final DoubleVector selfMaxY = DoubleVector.broadcast(SPECIES, self.maxY);
++        final DoubleVector selfMinZ = DoubleVector.broadcast(SPECIES, self.minZ);
++        final DoubleVector selfMaxZ = DoubleVector.broadcast(SPECIES, self.maxZ);
++        
++        int i = offset;
++        final int bound = offset + length - (length % LANES);
++        
++        // SIMD loop: process LANES AABBs per iteration
++        for (; i < bound; i += LANES) {
++            // Load LANES AABBs' bounds
++            final double[] otherMinX = new double[LANES];
++            final double[] otherMaxX = new double[LANES];
++            final double[] otherMinY = new double[LANES];
++            final double[] otherMaxY = new double[LANES];
++            final double[] otherMinZ = new double[LANES];
++            final double[] otherMaxZ = new double[LANES];
++            
++            for (int j = 0; j < LANES; j++) {
++                final AABB other = candidates[i + j];
++                otherMinX[j] = other.minX;
++                otherMaxX[j] = other.maxX;
++                otherMinY[j] = other.minY;
++                otherMaxY[j] = other.maxY;
++                otherMinZ[j] = other.minZ;
++                otherMaxZ[j] = other.maxZ;
++            }
++            
++            final DoubleVector vOtherMinX = DoubleVector.fromArray(SPECIES, otherMinX, 0);
++            final DoubleVector vOtherMaxX = DoubleVector.fromArray(SPECIES, otherMaxX, 0);
++            final DoubleVector vOtherMinY = DoubleVector.fromArray(SPECIES, otherMinY, 0);
++            final DoubleVector vOtherMaxY = DoubleVector.fromArray(SPECIES, otherMaxY, 0);
++            final DoubleVector vOtherMinZ = DoubleVector.fromArray(SPECIES, otherMinZ, 0);
++            final DoubleVector vOtherMaxZ = DoubleVector.fromArray(SPECIES, otherMaxZ, 0);
++            
++            // Vectorized intersection test: self.minX < other.maxX && self.maxX > other.minX
++            VectorMask<Double> mask = selfMinX.compare(jdk.incubator.vector.VectorOperators.LT, vOtherMaxX)
++                .and(selfMaxX.compare(jdk.incubator.vector.VectorOperators.GT, vOtherMinX))
++                .and(selfMinY.compare(jdk.incubator.vector.VectorOperators.LT, vOtherMaxY))
++                .and(selfMaxY.compare(jdk.incubator.vector.VectorOperators.GT, vOtherMinY))
++                .and(selfMinZ.compare(jdk.incubator.vector.VectorOperators.LT, vOtherMaxZ))
++                .and(selfMaxZ.compare(jdk.incubator.vector.VectorOperators.GT, vOtherMinZ));
++            
++            if (mask.anyTrue()) {
++                return i + mask.firstTrue();
++            }
++        }
++        
++        // Scalar remainder
++        return intersectsAnyScalar(self, candidates, i, offset + length - i);
++    }
++    
++    /**
++     * Scalar fallback for small batches or remainder elements.
++     */
++    private static int intersectsAnyScalar(AABB self, AABB[] candidates, int offset, int length) {
++        for (int i = offset; i < offset + length; i++) {
++            if (self.intersects(candidates[i])) {
++                return i;
++            }
++        }
++        return -1;
++    }
++    
++    /**
++     * Counts how many AABBs in the candidates array intersect with self.
++     * Useful for statistics and optimization decisions.
++     * 
++     * @param self The AABB to test
++     * @param candidates Array of candidate AABBs
++     * @param offset Starting index
++     * @param length Number of candidates
++     * @return Count of intersecting AABBs
++     */
++    public static int countIntersections(AABB self, AABB[] candidates, int offset, int length) {
++        if (length < MIN_SIMD_BATCH) {
++            return countIntersectionsScalar(self, candidates, offset, length);
++        }
++        
++        final DoubleVector selfMinX = DoubleVector.broadcast(SPECIES, self.minX);
++        final DoubleVector selfMaxX = DoubleVector.broadcast(SPECIES, self.maxX);
++        final DoubleVector selfMinY = DoubleVector.broadcast(SPECIES, self.minY);
++        final DoubleVector selfMaxY = DoubleVector.broadcast(SPECIES, self.maxY);
++        final DoubleVector selfMinZ = DoubleVector.broadcast(SPECIES, self.minZ);
++        final DoubleVector selfMaxZ = DoubleVector.broadcast(SPECIES, self.maxZ);
++        
++        int count = 0;
++        int i = offset;
++        final int bound = offset + length - (length % LANES);
++        
++        for (; i < bound; i += LANES) {
++            final double[] otherMinX = new double[LANES];
++            final double[] otherMaxX = new double[LANES];
++            final double[] otherMinY = new double[LANES];
++            final double[] otherMaxY = new double[LANES];
++            final double[] otherMinZ = new double[LANES];
++            final double[] otherMaxZ = new double[LANES];
++            
++            for (int j = 0; j < LANES; j++) {
++                final AABB other = candidates[i + j];
++                otherMinX[j] = other.minX;
++                otherMaxX[j] = other.maxX;
++                otherMinY[j] = other.minY;
++                otherMaxY[j] = other.maxY;
++                otherMinZ[j] = other.minZ;
++                otherMaxZ[j] = other.maxZ;
++            }
++            
++            final DoubleVector vOtherMinX = DoubleVector.fromArray(SPECIES, otherMinX, 0);
++            final DoubleVector vOtherMaxX = DoubleVector.fromArray(SPECIES, otherMaxX, 0);
++            final DoubleVector vOtherMinY = DoubleVector.fromArray(SPECIES, otherMinY, 0);
++            final DoubleVector vOtherMaxY = DoubleVector.fromArray(SPECIES, otherMaxY, 0);
++            final DoubleVector vOtherMinZ = DoubleVector.fromArray(SPECIES, otherMinZ, 0);
++            final DoubleVector vOtherMaxZ = DoubleVector.fromArray(SPECIES, otherMaxZ, 0);
++            
++            VectorMask<Double> mask = selfMinX.compare(jdk.incubator.vector.VectorOperators.LT, vOtherMaxX)
++                .and(selfMaxX.compare(jdk.incubator.vector.VectorOperators.GT, vOtherMinX))
++                .and(selfMinY.compare(jdk.incubator.vector.VectorOperators.LT, vOtherMaxY))
++                .and(selfMaxY.compare(jdk.incubator.vector.VectorOperators.GT, vOtherMinY))
++                .and(selfMinZ.compare(jdk.incubator.vector.VectorOperators.LT, vOtherMaxZ))
++                .and(selfMaxZ.compare(jdk.incubator.vector.VectorOperators.GT, vOtherMinZ));
++            
++            count += mask.trueCount();
++        }
++        
++        // Scalar remainder
++        count += countIntersectionsScalar(self, candidates, i, offset + length - i);
++        return count;
++    }
++    
++    private static int countIntersectionsScalar(AABB self, AABB[] candidates, int offset, int length) {
++        int count = 0;
++        for (int i = offset; i < offset + length; i++) {
++            if (self.intersects(candidates[i])) {
++                count++;
++            }
++        }
++        return count;
++    }
++    
++    /**
++     * Filters candidates array, returning only AABBs that intersect with self.
++     * Writes results to output array.
++     * 
++     * @param self The AABB to test against
++     * @param candidates Input array
++     * @param output Output array (must be at least as large as candidates)
++     * @param offset Starting index in candidates
++     * @param length Number of candidates to process
++     * @return Number of intersecting AABBs written to output
++     */
++    public static int filterIntersecting(AABB self, AABB[] candidates, AABB[] output, int offset, int length) {
++        int writeIndex = 0;
++        
++        // For now, use scalar (vectorizing gather/scatter is complex)
++        for (int i = offset; i < offset + length; i++) {
++            if (self.intersects(candidates[i])) {
++                output[writeIndex++] = candidates[i];
++            }
++        }
++        
++        return writeIndex;
++    }
++}
