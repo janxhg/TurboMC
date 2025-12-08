@@ -252,16 +252,6 @@
  
 +    // Paper start - rework world loading process
 +    protected void initPostWorld() {
-+        // TurboMC start - Initialize compression system
-+        try {
-+            com.turbomc.config.TurboConfig turboConfig = com.turbomc.config.TurboConfig.getInstance(this.getServerDirectory().toFile());
-+            com.turbomc.compression.TurboCompressionService.initialize(turboConfig);
-+            MinecraftServer.LOGGER.info("[TurboMC] Compression system initialized: {} (level {})", 
-+                turboConfig.getCompressionAlgorithm().toUpperCase(), turboConfig.getCompressionLevel());
-+        } catch (Exception e) {
-+            MinecraftServer.LOGGER.error("[TurboMC] Failed to initialize compression system", e);
-+        }
-+        // TurboMC end
 +        // Paper start - Configurable player collision; Handle collideRule team for player collision toggle
 +        final ServerScoreboard scoreboard = this.getScoreboard();
 +        final java.util.Collection<String> toRemove = scoreboard.getPlayerTeams().stream().filter(team -> team.getName().startsWith("collideRule_")).map(net.minecraft.world.scores.PlayerTeam::getName).collect(java.util.stream.Collectors.toList());
@@ -760,7 +750,7 @@
      protected void runServer() {
          try {
              if (!this.initServer()) {
-@@ -737,26 +_,69 @@
+@@ -737,26 +_,68 @@
              }
  
              this.nextTickTimeNanos = Util.getNanos();
@@ -768,7 +758,6 @@
              this.statusIcon = this.loadStatusIcon().orElse(null);
              this.status = this.buildServerStatus();
  
-+            com.turbomc.via.TurboViaLoader.init(this.server.getWorldContainer()); // TurboMC
 +            this.server.spark.enableBeforePlugins(); // Paper - spark
 +            // Spigot start
 +            // Paper start

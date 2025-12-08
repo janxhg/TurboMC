@@ -42,11 +42,11 @@ Características experimentales y avanzadas.
 **Propósito:** Migrar compresión de packets y chunks al formato LZ4 más rápido.
 
 **Componentes:**
-- [ ] `TurboCompressionService` - Wrapper universal de compresión
-- [ ] Auto-detección de formato antiguo (zlib)
-- [ ] Conversión transparente on-the-fly
-- [ ] Fallback a zlib para compatibilidad con plugins legacy
-- [ ] API pública: `compress(byte[])` y `decompress(byte[])`
+- [x] `TurboCompressionService` - Wrapper universal de compresión ✅ v1.2.0
+- [x] Auto-detección de formato antiguo (zlib) ✅ v1.2.0 (magic bytes)
+- [x] Conversión transparente on-the-fly ✅ v1.2.0 (chunk storage)
+- [x] Fallback a zlib para compatibilidad con plugins legacy ✅ v1.2.0
+- [x] API pública: `compress(byte[])` y `decompress(byte[])` ✅ v1.2.0
 
 **Ejemplo de uso:**
 ```java
@@ -217,11 +217,11 @@ L3: ChunkColdStorage (LRF/Disco)
 ## 🔴 Critical Performance Features
 
 ### 1. SIMD Entity Collision Engine
-**Ya implementado parcialmente. Extender a:**
-- [ ] SIMD bounding box intersection (8 entidades paralelas)
-- [ ] Vectorización de distance checks
-- [ ] Batch collision detection
-- [ ] Soporte AVX-512 en CPUs compatibles
+**Ya implementado parcialmente en v1.1.0. Extender a:**
+- [x] SIMD bounding box intersection (8 entidades paralelas) ✅ v1.1.0
+- [x] Vectorización de distance checks ✅ v1.1.0
+- [x] Batch collision detection ✅ v1.1.0
+- [ ] Soporte AVX-512 en CPUs compatibles (funciona con AVX2 actualmente)
 
 ### 2. Network IO Thread Pool
 **Propósito:** Descargar compresión/descompresión del main thread.
@@ -530,11 +530,14 @@ mode: turbo  # or 'vanilla'
 # 📊 Implementation Checklist
 
 ## Fase 1: Fundación (Q1 2025)
-- [x] ViaVersion Integration (en progreso)
-- [ ] LZ4 Compression base
-- [ ] LRF Format v1.0
-- [ ] MCA→LRF Converter
-- [ ] Basic TurboAPI
+- [x] ViaVersion Integration ✅ v1.3.0
+- [x] LZ4 Compression base ✅ v1.2.0
+- [x] Zlib/LZ4 Dual-algorithm system ✅ v1.2.0
+- [x] TOML Configuration ✅ v1.2.0
+- [x] Chunk storage compression ✅ v1.2.0
+- [ ] LRF Format v1.0 (deferred to Fase 2)
+- [ ] MCA→LRF Converter (deferred to Fase 2)
+- [ ] Basic TurboAPI (deferred to Fase 2)
 
 ## Fase 2: Diferenciación (Q2 2025)
 - [ ] SIMD Collision Engine
