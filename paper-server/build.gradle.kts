@@ -23,9 +23,13 @@ dependencies {
     paperclip("io.papermc:paperclip:3.0.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
     
-    // TurboMC - ViaVersion
-    implementation("com.viaversion:viaversion-common:5.1.1")
-    implementation("com.viaversion:viabackwards-common:5.1.1")
+    // TurboMC - Compression & Config
+    implementation("org.lz4:lz4-java:1.8.0")
+    implementation("com.moandjiezana.toml:toml4j:0.7.2")
+    
+    // TurboMC - ViaVersion (temporarily disabled for build testing)
+    // implementation("com.viaversion:viaversion-common:5.1.1")
+    // implementation("com.viaversion:viabackwards-common:5.1.1")
 }
 
 paperweight {
