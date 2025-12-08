@@ -1,5 +1,35 @@
-++++ REJECTED HUNK: 3
-@@ -50,22 +62,118 @@
+--- a/net/minecraft/server/network/ServerHandshakePacketListenerImpl.java
++++ b/net/minecraft/server/network/ServerHandshakePacketListenerImpl.java
+@@ -14,9 +_,20 @@
+ 
+ public class ServerHandshakePacketListenerImpl implements ServerHandshakePacketListener {
+     private static final Component IGNORE_STATUS_REASON = Component.translatable("disconnect.ignoring_status_request");
++    // Spigot start
++    private static final com.google.gson.Gson gson = new com.google.gson.Gson();
++    static final java.util.regex.Pattern HOST_PATTERN = java.util.regex.Pattern.compile("[0-9a-f\\.:]{0,45}");
++    static final java.util.regex.Pattern PROP_PATTERN = java.util.regex.Pattern.compile("\\w{0,16}");
++    // Spigot end
++    // Paper start - Connection throttle
++    private static final java.util.Map<java.net.InetAddress, Long> throttleTracker = new java.util.HashMap<>();
++    private static int throttleCounter = 0;
++    // Paper end - Connection throttle
++    private static final boolean BYPASS_HOSTCHECK = Boolean.getBoolean("Paper.bypassHostCheck"); // Paper
+     private final MinecraftServer server;
+     private final Connection connection;
+ 
++
+     public ServerHandshakePacketListenerImpl(MinecraftServer server, Connection connection) {
+         this.server = server;
+         this.connection = connection;
+@@ -24,6 +_,7 @@
+ 
+     @Override
+     public void handleIntention(ClientIntentionPacket packet) {
++        this.connection.hostname = packet.hostName() + ":" + packet.port(); // CraftBukkit  - set hostname
+         switch (packet.intention()) {
+             case LOGIN:
+                 this.beginLogin(packet, false);
+@@ -50,22 +_,118 @@
              default:
                  throw new UnsupportedOperationException("Invalid intention " + packet.intention());
          }
@@ -43,14 +73,7 @@
 +            org.apache.logging.log4j.LogManager.getLogger().debug("Failed to check connection throttle", t);
 +        }
 +        // Paper end - Connection throttle
-+        // TurboMC start - Multi-version protocol support for 1.21.x
-+        int clientProtocol = packet.protocolVersion();
-+        int serverProtocol = SharedConstants.getCurrentVersion().protocolVersion();
-+        // Accept protocols 767-773 (Minecraft 1.21 through 1.21.10)
-+        boolean isCompatibleProtocol = (clientProtocol >= 767 && clientProtocol <= 773) && 
-+                                       (serverProtocol >= 767 && serverProtocol <= 773);
-+        // TurboMC end
-+        if (!isCompatibleProtocol && clientProtocol != serverProtocol) {
++        if (packet.protocolVersion() != SharedConstants.getCurrentVersion().protocolVersion()) {
 -            Component component;
 -            if (packet.protocolVersion() < 754) {
 -                component = Component.translatable("multiplayer.disconnect.outdated_client", SharedConstants.getCurrentVersion().name());
@@ -129,4 +152,3 @@
          }
      }
  
-++++ END HUNK
