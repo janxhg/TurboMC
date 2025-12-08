@@ -34,3 +34,17 @@ Implemented Single Instruction, Multiple Data (SIMD) optimization for AABB colli
 ### Performance Verification
 - **Stress Test**: Sustained ~21,000 active collision entities (zombies in 1x1 space) without server crash.
 - **Requirements**: Server launch script must include `--add-modules=jdk.incubator.vector`.
+
+## v1.2.0 - Protocol 773 Support
+
+### Summary
+Added support for Minecraft protocol version 773, enabling compatibility with the latest Minecraft client versions. This update ensures TurboMC stays current with the latest Minecraft releases while maintaining all performance optimizations.
+
+### Technical Details
+- **Protocol Version**: Updated server protocol to support version 773.
+- **Compatibility**: Full backward compatibility with previous protocol versions maintained.
+- **Client Support**: Allows players using the latest Minecraft client to connect seamlessly.
+
+### Features
+- **773 Protocol Support**: Native support for protocol version 773.
+- **Maintained Optimizations**: All existing TurboMC optimizations (SIMD, LZ4) remain fully functional.
