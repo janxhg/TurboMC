@@ -29,7 +29,7 @@
          switch (packet.intention()) {
              case LOGIN:
                  this.beginLogin(packet, false);
-@@ -55,15 +_,111 @@
+@@ -62,8 +_,104 @@
              default:
                  throw new UnsupportedOperationException("Invalid intention " + packet.intention());
          }
@@ -73,7 +73,7 @@
 +            org.apache.logging.log4j.LogManager.getLogger().debug("Failed to check connection throttle", t);
 +        }
 +        // Paper end - Connection throttle
-+        if (packet.protocolVersion() != SharedConstants.getCurrentVersion().protocolVersion()) {
+         if (packet.protocolVersion() != SharedConstants.getCurrentVersion().protocolVersion()) {
 -            Component component;
 -            if (packet.protocolVersion() < 754) {
 -                component = Component.translatable("multiplayer.disconnect.outdated_client", SharedConstants.getCurrentVersion().name());

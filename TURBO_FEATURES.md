@@ -10,7 +10,15 @@ TurboMC utilizes Java's **Incubator Vector API** to parallelize AABB collision c
 *   **Scalability**: Tested sustaining **20,000+ entities** in a single block space without crashing the server thread.
 *   **Requirements**: Requires `--add-modules=jdk.incubator.vector` flag on startup.
 
-### 🚄 Native LZ4 Compression
+### �️ Configurable Compression System (v1.2.0+)
+Dynamic compression system supporting both **LZ4** (fast) and **Zlib** (compatible) algorithms, configurable via `turbo.toml`.
+*   **Dual-Algorithm Support**: Choose between LZ4 (speed-optimized) or Zlib (vanilla-compatible) compression.
+*   **Auto-Detection**: Automatically detects compression format via magic bytes (0x01=Zlib, 0x02=LZ4).
+*   **Fallback**: Gracefully falls back to alternative algorithm if decompression fails.
+*   **Statistics Tracking**: Real-time compression metrics and performance monitoring.
+*   **TOML Configuration**: User-friendly configuration in `turbo.toml` with hot-reload support.
+
+### �🚄 Native LZ4 Compression (v1.0.0)
 Replaces the standard Zlib compression for proxy connections with **LZ4**, designed for extreme speed.
 *   **Ultra-Low Latency**: Drastically reduces CPU time spent on packet compression/decompression.
 *   **Integration**: specifically tuned to work with **TurboProxy** (formerly Velocity) for seamless high-speed data transfer.
@@ -39,6 +47,6 @@ proxies:
 
 | Version | Codename | Main Changes |
 | :--- | :--- | :--- |
-| **1.2.0** | *Protocol Update* | **Native Multi-Version Support** (1.21.x + Older via ViaVersion). |
+| **1.2.0** | *Protocol Update* | **Configurable Compression System** (LZ4/Zlib), Native Multi-Version Support (ViaVersion integration deferred). |
 | **1.1.0** | *Vector Speed* | SIMD Collision Optimization (Vector API). |
 | **1.0.0** | *Genesis* | Initial fork, Native LZ4 Compression (replacing Zlib). |
