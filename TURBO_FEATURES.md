@@ -1,6 +1,6 @@
 # 🚀 TurboMC Full Feature List & Changelog
 
-This document details all modifications, improvements, and features added to **TurboMC** (Fork of Paper) up to version 1.1.0.
+This document details all modifications, improvements, and features added to **TurboMC** (Fork of Paper) up to version 1.2.0.
 
 ## 🛠️ Performance & Core
 
@@ -39,5 +39,6 @@ proxies:
 
 | Version | Codename | Main Changes |
 | :--- | :--- | :--- |
+| **1.2.0** | *Protocol Update* | Protocol 773 Support for latest Minecraft versions. |
 | **1.1.0** | *Vector Speed* | SIMD Collision Optimization (Vector API). |
 | **1.0.0** | *Genesis* | Initial fork, Native LZ4 Compression (replacing Zlib). |
