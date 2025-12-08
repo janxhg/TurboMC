@@ -73,7 +73,14 @@
 +            org.apache.logging.log4j.LogManager.getLogger().debug("Failed to check connection throttle", t);
 +        }
 +        // Paper end - Connection throttle
-         if (packet.protocolVersion() != SharedConstants.getCurrentVersion().protocolVersion()) {
++        // TurboMC start - Multi-version protocol support for 1.21.x
++        int clientProtocol = packet.protocolVersion();
++        int serverProtocol = SharedConstants.getCurrentVersion().protocolVersion();
++        // Accept protocols 767-773 (Minecraft 1.21 through 1.21.10)
++        boolean isCompatibleProtocol = (clientProtocol >= 767 && clientProtocol <= 773) && 
++                                       (serverProtocol >= 767 && serverProtocol <= 773);
++        // TurboMC end
++        if (!isCompatibleProtocol && clientProtocol != serverProtocol) {
 -            Component component;
 -            if (packet.protocolVersion() < 754) {
 -                component = Component.translatable("multiplayer.disconnect.outdated_client", SharedConstants.getCurrentVersion().name());

@@ -38,13 +38,14 @@ Implemented Single Instruction, Multiple Data (SIMD) optimization for AABB colli
 ## v1.2.0 - Protocol 773 Support
 
 ### Summary
-Added support for Minecraft protocol version 773, enabling compatibility with the latest Minecraft client versions. This update ensures TurboMC stays current with the latest Minecraft releases while maintaining all performance optimizations.
+Added support for Minecraft protocol version 773 (1.21.9-1.21.10) with multi-version compatibility. Clients using Minecraft 1.21 through 1.21.10 (protocols 767-773) can now connect to TurboMC servers seamlessly.
 
 ### Technical Details
-- **Protocol Version**: Updated server protocol to support version 773.
-- **Compatibility**: Full backward compatibility with previous protocol versions maintained.
-- **Client Support**: Allows players using the latest Minecraft client to connect seamlessly.
+- **Multi-Version Protocol**: Server accepts client protocols 767-773 (Minecraft 1.21 through 1.21.10).
+- **Backward Compatibility**: All 1.21.x clients are supported without "Outdated client" errors.
+- **TurboProxy Integration**: Optimized for use with TurboProxy for high-performance connections.
 
 ### Features
-- **773 Protocol Support**: Native support for protocol version 773.
+- **Protocol 773 Support**: Native support for Minecraft 1.21.10 protocol.
+- **Linear Region Format**: New `.linear` chunk storage format with compression (experimental).
 - **Maintained Optimizations**: All existing TurboMC optimizations (SIMD, LZ4) remain fully functional.
