@@ -47,6 +47,7 @@ proxies:
 
 | Version | Codename | Main Changes |
 | :--- | :--- | :--- |
+| **1.2.1** | *Turbo Integration* | **Compression Integration**: Chunk storage now uses TurboConfig (LZ4/Zlib). |
 | **1.2.0** | *Protocol Update* | **Configurable Compression System** (LZ4/Zlib), Native Multi-Version Support (ViaVersion integration deferred). |
 | **1.1.0** | *Vector Speed* | SIMD Collision Optimization (Vector API). |
 | **1.0.0** | *Genesis* | Initial fork, Native LZ4 Compression (replacing Zlib). |
