@@ -29,7 +29,7 @@
          switch (packet.intention()) {
              case LOGIN:
                  this.beginLogin(packet, false);
-@@ -50,22 +_,118 @@
+@@ -62,8 +_,104 @@
              default:
                  throw new UnsupportedOperationException("Invalid intention " + packet.intention());
          }

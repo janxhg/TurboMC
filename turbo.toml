@@ -1,0 +1,27 @@
+# TurboMC Configuration File
+# This file controls server-specific optimizations and features unique to TurboMC
+
+[compression]
+# Compression algorithm: "lz4" (faster) or "zlib" (vanilla compatible)
+algorithm = "lz4"
+
+# Compression level
+# - For LZ4: 1-17 (higher = more compression, slower)
+# - For Zlib: 1-9 (higher = more compression, slower)
+level = 6
+
+# Automatically migrate old zlib-compressed data to LZ4 format
+auto-migrate = true
+
+# Enable fallback to zlib if LZ4 decompression fails
+fallback-enabled = true
+
+[version-control]
+# Minimum Minecraft version allowed to connect (e.g., "1.20.1")
+minimum-version = "1.20.1"
+
+# Maximum Minecraft version allowed (usually server version)
+maximum-version = "1.21.10"
+
+# List of specific versions to block (e.g., ["1.20.3", "1.20.4"])
+blocked-versions = []

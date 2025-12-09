@@ -1,0 +1,150 @@
+package com.turbomc.via;
+
+import com.viaversion.viaversion.api.configuration.ViaVersionConfig;
+import org.bukkit.configuration.file.YamlConfiguration;
+
+import java.io.File;
+import java.util.Arrays;
+import java.util.List;
+
+public class TurboViaConfig implements ViaVersionConfig {
+    private final File configFile;
+    private YamlConfiguration config;
+
+    public TurboViaConfig(File configFile) {
+        this.configFile = configFile;
+        reload();
+    }
+
+    public void reload() {
+        this.config = YamlConfiguration.loadConfiguration(configFile);
+        config.addDefault("checkforupdates", true);
+        config.addDefault("hologram-patch", false);
+        config.addDefault("hologram-y-offset", -0.96);
+        config.addDefault("max-pps", -1);
+        config.addDefault("max-pps-kick-msg", "Sending packets too fast");
+        config.addDefault("tracking-period", 6);
+        config.addDefault("tracking-warning-pps", 120);
+        config.addDefault("tracking-max-warnings", 3);
+        config.addDefault("tracking-max-kick-msg", "You are sending too many packets!");
+        config.options().copyDefaults(true);
+        save();
+    }
+
+    public void save() {
+        try {
+            config.save(configFile);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    @Override
+    public boolean isCheckForUpdates() {
+        return config.getBoolean("checkforupdates", true);
+    }
+
+    @Override
+    public void setCheckForUpdates(boolean check) {
+        config.set("checkforupdates", check);
+        save();
+    }
+
+    // Keep without @Override - may not be in interface anymore
+    public boolean isPreventCollision() { return false; }
+    public boolean isNewEffectIndicator() { return false; }
+    public boolean isShowNewDeathMessages() { return false; }
+    public boolean isSuppressMetadataErrors() { return false; }
+    public boolean isShieldBlocking() { return false; }
+    public boolean isNoDelayShieldBlocking() { return false; }
+    public boolean isShowShieldWhenSwordInHand() { return false; }
+
+    @Override
+    public boolean isHologramPatch() {
+        return config.getBoolean("hologram-patch", false);
+    }
+
+    @Override
+    public boolean isPistonAnimationPatch() { return false; }
+    
+    @Override
+    public boolean isBossbarPatch() { return true; }
+    
+    @Override
+    public boolean isBossbarAntiflicker() { return false; }
+
+    @Override
+    public double getHologramYOffset() {
+        return config.getDouble("hologram-y-offset", -0.96);
+    }
+
+    @Override
+    public int getMaxPPS() { return config.getInt("max-pps", -1); }
+    @Override
+    public String getMaxPPSKickMessage() { return config.getString("max-pps-kick-msg", "Sending packets too fast"); }
+    @Override
+    public int getTrackingPeriod() { return config.getInt("tracking-period", 6); }
+    @Override
+    public int getWarningPPS() { return config.getInt("tracking-warning-pps", 120); }
+    @Override
+    public int getMaxWarnings() { return config.getInt("tracking-max-warnings", 3); }
+    @Override
+    public String getMaxWarningsKickMessage() { return config.getString("tracking-max-kick-msg", "You are sending too many packets!"); }
+
+    // Logic removed from interface? Keeping implementations without @Override
+    public boolean isSendSupportedVersions() { return false; }
+    public boolean isSimulatePlayerTick() { return true; }
+    public boolean isItemCache() { return false; }
+    public boolean isNMSPlayerTicking() { return true; }
+    public boolean isReplacePistons() { return false; }
+    public int getPistonReplacementId() { return -1; }
+    
+    public boolean isChunkBorderFix() { return false; }
+    
+    public boolean isEjectingBlockedListPacket() { return true; }
+    public boolean is1_12QuickMoveActionFix() { return false; }
+
+    @Override
+    public List<String> getBlockedProtocols() { return Arrays.asList(); }
+    @Override
+    public String getBlockedDisconnectMsg() { return "Unsupported protocol version"; }
+    @Override
+    public String getReloadDisconnectMsg() { return "Server reloading"; }
+
+    public boolean isMinimizeCooldown() { return true; }
+    public boolean is1_13TabCompleteDelay() { return true; }
+    public List<String> getUncache1_13TabComplete() { return Arrays.asList(); }
+
+    @Override
+    public int get1_13TabCompleteDelay() { return 0; }
+
+    public boolean isTruncate1_14Books() { return false; }
+    public boolean isLeftHandedHandling() { return true; }
+    public boolean is1_9HitboxFix() { return false; }
+    public boolean is1_14HitboxFix() { return false; }
+    public boolean isNonFullBlockLightFix() { return false; }
+    public boolean is1_14HealthNaNFix() { return false; }
+    public boolean is1_15InstantRespawn() { return false; }
+    public boolean isIgnoreLong1_16ChannelNames() { return true; }
+    public boolean isForcedUse1_17ResourcePack() { return false; }
+    public boolean isResourcePack1_17PromptMessage() { return false; }
+    public boolean is1_17GPFPacketFix() { return true; }
+    public boolean isFix1_17ChatColor() { return true; }
+    public boolean isUse1_19_4ArgumentTypeFix() { return true; }
+    public boolean isArmorToggleFix() { return true; }
+    
+    @Override
+    public boolean fix1_21PlacementRotation() {
+        return false;
+    }
+    
+    @Override
+    public boolean hideScoreboardNumbers() {
+        return false;
+    }
+    
+    @Override
+    public boolean cancelBlockSounds() {
+        return false;
+    }
+}

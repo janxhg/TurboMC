@@ -13,10 +13,25 @@ plugins {
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
 
+repositories {
+    mavenCentral()
+    maven("https://repo.viaversion.com")
+}
+
 dependencies {
     mache("io.papermc:mache:1.21.10+build.9")
     paperclip("io.papermc:paperclip:3.0.3")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    
+    // TurboMC - Compression & Config (v1.2.0)
+    implementation("org.lz4:lz4-java:1.8.0")
+    implementation("com.moandjiezana.toml:toml4j:0.7.2")
+    
+    // TurboMC - ViaVersion Multi-Version Support (v1.3.0 - API compatibility work in progress)
+    // NOTE: ViaVersion 5.1.1 API has numerous breaking changes from previous versions.
+    // Integration will be completed in v1.3.0 after API adapter layer is implemented.
+    // implementation("com.viaversion:viaversion-common:5.1.1")
+    // implementation("com.viaversion:viabackwards-common:5.1.1")
 }
 
 paperweight {
