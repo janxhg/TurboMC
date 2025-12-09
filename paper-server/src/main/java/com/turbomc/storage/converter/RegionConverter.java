@@ -1,6 +1,7 @@
 package com.turbomc.storage.converter;
 
 import com.turbomc.storage.LRFConstants;
+import com.turbomc.storage.StorageFormat;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -113,6 +114,32 @@ public class RegionConverter {
      */
     public static boolean isRegionFile(Path path) {
         return detectFormat(path) != FormatType.UNKNOWN;
+    }
+
+    /**
+     * Convert all region files inside a given directory to the desired storage format.
+     * <p>
+     * This is a convenience wrapper that translates the public {@link StorageFormat}
+     * into the internal {@link FormatType} enum used by the low-level converters.
+     * </p>
+     *
+     * @param sourceDir Existing directory containing .mca or .lrf region files
+     * @param targetDir Directory where converted regions will be written
+     * @param targetFormat Desired storage format (MCA or LRF)
+     * @return Batch conversion result from the underlying converter
+     * @throws IOException if conversion fails
+     */
+    public Object convertRegionDirectory(Path sourceDir, Path targetDir, StorageFormat targetFormat) throws IOException {
+        if (targetFormat == null) {
+            targetFormat = StorageFormat.MCA;
+        }
+
+        FormatType internalTarget = switch (targetFormat) {
+            case MCA -> FormatType.MCA;
+            case LRF -> FormatType.LRF;
+        };
+
+        return convertDirectory(sourceDir, targetDir, internalTarget);
     }
     
     /**
