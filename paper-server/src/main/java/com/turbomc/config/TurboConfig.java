@@ -55,6 +55,10 @@ public class TurboConfig {
         return instance;
     }
     
+    public static boolean isInitialized() {
+        return instance != null;
+    }
+    
     private void createDefaultConfig() {
         try {
             // Write default configuration
@@ -86,6 +90,66 @@ public class TurboConfig {
                 
                 # Conversion mode: "on-demand" (convert as chunks load), "background" (idle time), "full-lrf" (convert all at startup), or "manual"
                 conversion-mode = "on-demand"
+                
+                # Backup original MCA files before deletion
+                backup-original-mca = false
+                
+                # Batch operations configuration
+                [storage.batch]
+                # Enable batch chunk loading/saving
+                enabled = true
+                
+                # Number of threads for batch loading operations
+                load-threads = 4
+                
+                # Number of threads for batch saving operations  
+                save-threads = 2
+                
+                # Maximum chunks per batch operation
+                batch-size = 32
+                
+                # Maximum concurrent loading operations
+                max-concurrent-loads = 64
+                
+                # Memory-mapped read-ahead engine
+                [storage.mmap]
+                # Enable memory-mapped read-ahead for SSD/NVMe optimization
+                enabled = true
+                
+                # Maximum cache size in number of chunks
+                max-cache-size = 512
+                
+                # Prefetch distance in chunks from player position
+                prefetch-distance = 4
+                
+                # Prefetch batch size
+                prefetch-batch-size = 16
+                
+                # Maximum memory usage for caching (in MB)
+                max-memory-usage = 256
+                
+                # Use Java 22+ Foreign Memory API if available
+                use-foreign-memory-api = true
+                
+                # Integrity validation system
+                [storage.integrity]
+                # Enable chunk integrity validation with checksums
+                enabled = true
+                
+                # Primary checksum algorithm: "crc32", "crc32c", "sha256"
+                primary-algorithm = "crc32c"
+                
+                # Backup checksum algorithm for verification (null to disable)
+                backup-algorithm = "sha256"
+                
+                # Enable automatic repair from backups
+                auto-repair = true
+                
+                # Number of validation threads
+                validation-threads = 2
+                
+                # Validation interval in milliseconds (5 minutes)
+                validation-interval = 300000
                 
                 [version-control]
                 # Minimum Minecraft version allowed to connect (e.g., "1.20.1")
@@ -139,7 +203,51 @@ public class TurboConfig {
             // Storage section
             Map<String, Object> storage = (Map<String, Object>) turboSection.get("storage");
             if (storage != null) {
-                tomlMap.put("storage", storage);
+                // Create a copy to add missing defaults
+                Map<String, Object> storageFull = new HashMap<>(storage);
+                
+                // Handle nested batch section
+                Map<String, Object> batch = (Map<String, Object>) storage.get("batch");
+                if (batch == null) {
+                    // Add default batch section if missing
+                    Map<String, Object> defaultBatch = new HashMap<>();
+                    defaultBatch.put("enabled", true);
+                    defaultBatch.put("load-threads", 4);
+                    defaultBatch.put("save-threads", 2);
+                    defaultBatch.put("batch-size", 32);
+                    defaultBatch.put("max-concurrent-loads", 64);
+                    storageFull.put("batch", defaultBatch);
+                }
+                
+                // Handle nested mmap section
+                Map<String, Object> mmap = (Map<String, Object>) storage.get("mmap");
+                if (mmap == null) {
+                    // Add default mmap section if missing
+                    Map<String, Object> defaultMmap = new HashMap<>();
+                    defaultMmap.put("enabled", true);
+                    defaultMmap.put("max-cache-size", 512);
+                    defaultMmap.put("prefetch-distance", 4);
+                    defaultMmap.put("prefetch-batch-size", 16);
+                    defaultMmap.put("max-memory-usage", 256);
+                    defaultMmap.put("use-foreign-memory-api", true);
+                    storageFull.put("mmap", defaultMmap);
+                }
+                
+                // Handle nested integrity section
+                Map<String, Object> integrity = (Map<String, Object>) storage.get("integrity");
+                if (integrity == null) {
+                    // Add default integrity section if missing
+                    Map<String, Object> defaultIntegrity = new HashMap<>();
+                    defaultIntegrity.put("enabled", true);
+                    defaultIntegrity.put("primary-algorithm", "crc32c");
+                    defaultIntegrity.put("backup-algorithm", "sha256");
+                    defaultIntegrity.put("auto-repair", true);
+                    defaultIntegrity.put("validation-threads", 2);
+                    defaultIntegrity.put("validation-interval", 300000);
+                    storageFull.put("integrity", defaultIntegrity);
+                }
+                
+                tomlMap.put("storage", storageFull);
             }
             
             // Version control section
@@ -160,8 +268,23 @@ public class TurboConfig {
             if (tomlMap.containsKey("storage")) {
                 Map<String, Object> storageSection = (Map<String, Object>) tomlMap.get("storage");
                 tomlBuilder.append("[storage]\n");
+                
+                // Write main storage properties
                 for (Map.Entry<String, Object> entry : storageSection.entrySet()) {
-                    tomlBuilder.append(entry.getKey()).append(" = ").append(entry.getValue()).append("\n");
+                    String key = entry.getKey();
+                    Object value = entry.getValue();
+                    
+                    if (value instanceof Map) {
+                        // Handle nested sections (batch, mmap, integrity)
+                        Map<String, Object> nested = (Map<String, Object>) value;
+                        tomlBuilder.append("\n[storage.").append(key).append("]\n");
+                        for (Map.Entry<String, Object> nestedEntry : nested.entrySet()) {
+                            tomlBuilder.append(nestedEntry.getKey()).append(" = ").append(nestedEntry.getValue()).append("\n");
+                        }
+                    } else {
+                        // Handle direct storage properties
+                        tomlBuilder.append(key).append(" = ").append(value).append("\n");
+                    }
                 }
             }
             if (tomlMap.containsKey("version-control")) {
@@ -212,6 +335,87 @@ public class TurboConfig {
         return toml.getString("storage.conversion-mode", "on-demand");
     }
     
+    // === Batch Operations Settings ===
+    
+    public boolean isBatchEnabled() {
+        return toml.getBoolean("storage.batch.enabled", true);
+    }
+    
+    public int getBatchLoadThreads() {
+        return toml.getLong("storage.batch.load-threads", 4L).intValue();
+    }
+    
+    public int getBatchSaveThreads() {
+        return toml.getLong("storage.batch.save-threads", 2L).intValue();
+    }
+    
+    public int getBatchSize() {
+        return toml.getLong("storage.batch.batch-size", 32L).intValue();
+    }
+    
+    public int getMaxConcurrentLoads() {
+        return toml.getLong("storage.batch.max-concurrent-loads", 64L).intValue();
+    }
+    
+    // === Memory-Mapped Settings ===
+    
+    public boolean isMmapEnabled() {
+        return toml.getBoolean("storage.mmap.enabled", true);
+    }
+    
+    public int getMaxCacheSize() {
+        return toml.getLong("storage.mmap.max-cache-size", 512L).intValue();
+    }
+    
+    public int getPrefetchDistance() {
+        return toml.getLong("storage.mmap.prefetch-distance", 4L).intValue();
+    }
+    
+    public int getPrefetchBatchSize() {
+        return toml.getLong("storage.mmap.prefetch-batch-size", 16L).intValue();
+    }
+    
+    public int getMaxMemoryUsage() {
+        return toml.getLong("storage.mmap.max-memory-usage", 256L).intValue();
+    }
+    
+    public boolean useForeignMemoryApi() {
+        return toml.getBoolean("storage.mmap.use-foreign-memory-api", true);
+    }
+    
+    // === Integrity Validation Settings ===
+    
+    public boolean isIntegrityEnabled() {
+        return toml.getBoolean("storage.integrity.enabled", true);
+    }
+    
+    public String getPrimaryAlgorithm() {
+        return toml.getString("storage.integrity.primary-algorithm", "crc32c");
+    }
+    
+    public String getBackupAlgorithm() {
+        return toml.getString("storage.integrity.backup-algorithm", "sha256");
+    }
+    
+    public boolean isAutoRepairEnabled() {
+        return toml.getBoolean("storage.integrity.auto-repair", true);
+    }
+    
+    public int getValidationThreads() {
+        return toml.getLong("storage.integrity.validation-threads", 2L).intValue();
+    }
+    
+    public long getValidationInterval() {
+        return toml.getLong("storage.integrity.validation-interval", 300000L);
+    }
+    
+    /**
+     * Get whether to backup original MCA files before deletion.
+     */
+    public boolean isBackupMcaEnabled() {
+        return getBoolean("storage.backup-original-mca", false);
+    }
+    
     /**
      * Get the conversion mode as a ConversionMode enum.
      * 
@@ -244,7 +448,8 @@ public class TurboConfig {
     public void migrateWorldRegionsIfNeeded(Path worldDirectory) {
         try {
             TurboStorageConfig storageCfg = getStorageConfig();
-            TurboStorageMigrator.migrateWorldIfNeeded(worldDirectory, storageCfg);
+            ConversionMode conversionMode = getConversionModeEnum();
+            TurboStorageMigrator.migrateWorldIfNeeded(worldDirectory, storageCfg, conversionMode);
         } catch (IOException e) {
             System.err.println("[TurboMC] Failed to migrate world regions: " + e.getMessage());
             e.printStackTrace();
@@ -264,6 +469,31 @@ public class TurboConfig {
     
     public List<String> getBlockedVersions() {
         return toml.getList("version-control.blocked-versions", List.of());
+    }
+    
+    // Generic getter methods for any configuration value
+    public String getString(String key, String defaultValue) {
+        return toml.getString(key, defaultValue);
+    }
+    
+    public boolean getBoolean(String key, boolean defaultValue) {
+        return toml.getBoolean(key, defaultValue);
+    }
+    
+    public int getInt(String key, int defaultValue) {
+        return toml.getLong(key, (long) defaultValue).intValue();
+    }
+    
+    public long getLong(String key, long defaultValue) {
+        return toml.getLong(key, defaultValue);
+    }
+    
+    public double getDouble(String key, double defaultValue) {
+        return toml.getDouble(key, defaultValue);
+    }
+    
+    public List<String> getList(String key, List<String> defaultValue) {
+        return toml.getList(key, defaultValue);
     }
     
     public void reload() {

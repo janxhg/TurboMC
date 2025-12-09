@@ -9,16 +9,19 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
+import java.util.Arrays;
 import java.util.Random;
 
 /**
  * Integration tests for LRF storage system.
- * Tests real-world scenarios and migration processes.
+ * Tests real-world scenarios and migration processes using actual LRF classes.
  */
 public class LRFIntegrationTest {
     
     private Path testDir;
     private Path worldDir;
+    private TestDataGenerator dataGenerator;
     private Random random;
     
     @BeforeEach
@@ -26,6 +29,7 @@ public class LRFIntegrationTest {
         testDir = Files.createTempDirectory("turbomc_integration_test");
         worldDir = testDir.resolve("world");
         Files.createDirectories(worldDir);
+        dataGenerator = new TestDataGenerator(54321); // Fixed seed for reproducible tests
         random = new Random(54321); // Fixed seed for reproducible tests
     }
     

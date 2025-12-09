@@ -26,6 +26,63 @@ auto-convert = true
 # Conversion mode: "on-demand" (convert as chunks load), "background" (idle time), or "manual"
 conversion-mode = "on-demand"
 
+# Batch operations configuration
+[storage.batch]
+# Enable batch chunk loading/saving
+enabled = true
+
+# Number of threads for batch loading operations
+load-threads = 4
+
+# Number of threads for batch saving operations  
+save-threads = 2
+
+# Maximum chunks per batch operation
+batch-size = 32
+
+# Maximum concurrent loading operations
+max-concurrent-loads = 64
+
+# Memory-mapped read-ahead engine
+[storage.mmap]
+# Enable memory-mapped read-ahead for SSD/NVMe optimization
+enabled = true
+
+# Maximum cache size in number of chunks
+max-cache-size = 512
+
+# Prefetch distance in chunks from player position
+prefetch-distance = 4
+
+# Prefetch batch size
+prefetch-batch-size = 16
+
+# Maximum memory usage for caching (in MB)
+max-memory-usage = 256
+
+# Use Java 22+ Foreign Memory API if available
+use-foreign-memory-api = true
+
+# Integrity validation system
+[storage.integrity]
+# Enable chunk integrity validation with checksums
+enabled = true
+
+# Primary checksum algorithm: "crc32", "crc32c", "sha256"
+primary-algorithm = "crc32c"
+
+# Backup checksum algorithm for verification (null to disable)
+backup-algorithm = "sha256"
+
+# Enable automatic repair from backups
+auto-repair = true
+
+# Number of validation threads
+validation-threads = 2
+
+# Validation interval in milliseconds (5 minutes)
+validation-interval = 300000
+
 [version-control]
 # Minimum Minecraft version allowed to connect (e.g., "1.20.1")
 minimum-version = "1.20.1"

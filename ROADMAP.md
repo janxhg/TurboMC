@@ -63,7 +63,7 @@ byte[] decompressed = TurboCompressionService.decompress(compressed);
 - [x] **Conversión completa:** Todo el mundo de una vez (CLI) ✅ v1.3.0
 - [x] **Conversión incremental:** Por regiones con throttling ✅ v1.3.0
 - [x] **On-demand:** Convierte chunks cuando son cargados por primera vez ✅ v1.3.0
-- [ ] **Background:** Conversión automática en bajo uso del servidor
+- [x] **Background:** Conversión automática en bajo uso del servidor ✅ v1.3.0
 
 **Componentes:**
 - [x] `LRFRegionWriter` - Escritor del nuevo formato ✅ v1.3.0
@@ -93,7 +93,7 @@ Chunks (sequential, no padding)
 
 - [x] Implementar `LRFRegionReader` ✅ v1.3.0
 - [x] Implementar `AnvilRegionWriter` ✅ v1.3.0
-- [ ] CLI: `java -jar TurboTools.jar convert world/region --to-mca`
+- [ ] CLI: `java -jar TurboTools.jar convert world/region --to-mca` v1.4.0
 - [x] Validación de integridad durante conversión ✅ v1.3.0
 
 
@@ -169,10 +169,10 @@ byte[] compressed = data.compress();
 - [x] `MCAToLRFConverter` - Conversor MCA → LRF ✅ v1.3.0
 - [x] `LRFToMCAConverter` - Conversor LRF → MCA ✅ v1.3.0
 - [x] `RegionConverter` - Auto-detección y conversión unificada ✅ v1.3.0
-- [ ] `ChunkBatchLoader` - Carga múltiples chunks en paralelo
-- [ ] `ChunkBatchSaver` - Escritura por lotes
-- [ ] mmap read-ahead engine para SSD/NVMe
-- [ ] Validación de integridad (checksums)
+- [x] `ChunkBatchLoader` - Carga múltiples chunks en paralelo v1.4.0
+- [x] `ChunkBatchSaver` - Escritura por lotes v1.4.0
+- [x] mmap read-ahead engine para SSD/NVMe v1.4.0
+- [x] Validación de integridad (checksums) v1.4.0
 
 
 ---
@@ -544,8 +544,8 @@ mode: turbo  # or 'vanilla'
 - [x] Zlib/LZ4 Dual-algorithm system ✅ v1.2.0
 - [x] TOML Configuration ✅ v1.2.0
 - [x] Chunk storage compression ✅ v1.2.0
-- [ ] LRF Format v1.0 (deferred to Fase 2)
-- [ ] MCA→LRF Converter (deferred to Fase 2)
+- [ ] LRF Format v1.0 (deferred to Fase 2) v1.3.0
+- [ ] MCA→LRF Converter (deferred to Fase 2) v1.3.0
 - [ ] Basic TurboAPI (deferred to Fase 2)
 
 ## Fase 2: Diferenciación (Q2 2025)

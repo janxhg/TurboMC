@@ -1,6 +1,7 @@
 package com.turbomc.storage;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -151,7 +152,9 @@ public class AnvilRegionReader implements AutoCloseable {
             } else {
                 throw new IOException("Unknown compression type: " + compressionType);
             }
-        } catch (IOException e) {
+        } catch (Exception e) {
+            // Log the error but don't fail the entire conversion
+            System.err.println("[TurboMC] Warning: Failed to decompress chunk, skipping: " + e.getMessage());
             throw new IOException("Failed to decompress chunk", e);
         }
     }
@@ -183,9 +186,14 @@ public class AnvilRegionReader implements AutoCloseable {
         
         for (int x = 0; x < LRFConstants.REGION_SIZE; x++) {
             for (int z = 0; z < LRFConstants.REGION_SIZE; z++) {
-                LRFChunkEntry chunk = readChunk(x, z);
-                if (chunk != null) {
-                    chunks.add(chunk);
+                try {
+                    LRFChunkEntry chunk = readChunk(x, z);
+                    if (chunk != null) {
+                        chunks.add(chunk);
+                    }
+                } catch (Exception e) {
+                    // Skip corrupt chunks but continue reading others
+                    System.err.println("[TurboMC] Warning: Skipping corrupt chunk at [" + x + "," + z + "]: " + e.getMessage());
                 }
             }
         }

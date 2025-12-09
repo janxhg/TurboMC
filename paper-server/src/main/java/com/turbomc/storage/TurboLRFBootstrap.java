@@ -2,6 +2,7 @@ package com.turbomc.storage;
 
 import com.turbomc.config.TurboConfig;
 import com.turbomc.storage.ConversionMode;
+import com.turbomc.commands.TurboCommandRegistry;
 
 import java.nio.file.Path;
 import java.nio.file.Files;
@@ -105,6 +106,24 @@ public final class TurboLRFBootstrap {
             }
 
             System.out.println("[TurboMC][LRF] LRF storage system initialized successfully.");
+            
+            // Initialize the Turbo Storage Manager with all advanced features
+            System.out.println("[TurboMC][LRF] Initializing Turbo Storage Manager...");
+            TurboStorageManager storageManager = TurboStorageManager.getInstance();
+            storageManager.initialize();
+            
+            // Install storage hooks for seamless integration with Paper's chunk system
+            System.out.println("[TurboMC][LRF] Installing storage hooks...");
+            TurboStorageHooks.installHooks();
+            
+            // Register TurboMC commands
+            System.out.println("[TurboMC][LRF] Registering TurboMC commands...");
+            // Note: Commands will be registered by the plugin/main class during server startup
+            
+            // If FULL_LRF mode is enabled, perform migration now
+            if (conversionMode == ConversionMode.FULL_LRF && autoConvert) {
+                performFullLRFMigration(serverDirectory);
+            }
         } catch (Exception e) {
             System.err.println("[TurboMC][LRF] Failed to initialize LRF storage system: " + e.getMessage());
             e.printStackTrace();
@@ -126,6 +145,12 @@ public final class TurboLRFBootstrap {
      */
     public static void migrateWorldIfNeeded(Path worldDirectory) {
         try {
+            // Check if TurboConfig is initialized
+            if (!TurboConfig.isInitialized()) {
+                System.out.println("[TurboMC][LRF] TurboConfig not yet initialized, skipping world migration for: " + worldDirectory);
+                return;
+            }
+            
             TurboConfig config = TurboConfig.getInstance();
             ConversionMode conversionMode = config.getConversionModeEnum();
             
@@ -167,6 +192,7 @@ public final class TurboLRFBootstrap {
                 Path worldDir = serverDirectory.resolve(worldName);
                 if (Files.isDirectory(worldDir)) {
                     System.out.println("[TurboMC][LRF] Migrating world: " + worldName);
+                    // Use the full LRF conversion mode
                     config.migrateWorldRegionsIfNeeded(worldDir);
                 }
             }

@@ -1,6 +1,7 @@
 package com.turbomc.storage.converter;
 
 import com.turbomc.storage.*;
+import com.turbomc.config.TurboConfig;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -88,6 +89,43 @@ public class MCAToLRFConverter {
             }
             writer.flush();
             lrfSize = Files.size(lrfPath);
+        }
+        
+        // Eliminar el archivo .mca original después de conversión exitosa
+        if (lrfSize > 0 && chunks.size() > 0) {
+            try {
+                // Verificar si se debe hacer backup usando configuración de TurboConfig
+                boolean shouldBackup = false;
+                try {
+                    TurboConfig config = TurboConfig.getInstance();
+                    shouldBackup = config.isBackupMcaEnabled();
+                } catch (Exception e) {
+                    // Si TurboConfig no está disponible, usar valor por defecto (false)
+                    shouldBackup = false;
+                }
+                
+                if (shouldBackup) {
+                    // Crear directorio de backup
+                    Path backupDir = mcaPath.getParent().resolve("backup_mca");
+                    Files.createDirectories(backupDir);
+                    Path backupPath = backupDir.resolve(mcaPath.getFileName());
+                    
+                    // Mover archivo a backup en lugar de eliminar
+                    Files.move(mcaPath, backupPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    if (verbose) {
+                        System.out.println("[TurboMC] Backed up original: " + mcaPath.getFileName() + " → backup_mca/");
+                    }
+                } else {
+                    // Eliminar directamente
+                    Files.delete(mcaPath);
+                    if (verbose) {
+                        System.out.println("[TurboMC] Removed original: " + mcaPath.getFileName());
+                    }
+                }
+            } catch (IOException e) {
+                System.err.println("[TurboMC] Warning: Failed to delete original .mca file: " + e.getMessage());
+                // No lanzar excepción, la conversión fue exitosa
+            }
         }
         
         long elapsed = System.currentTimeMillis() - startTime;
