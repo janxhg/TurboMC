@@ -37,6 +37,8 @@ public class ChunkBatchLoader implements AutoCloseable {
     private final ExecutorService decompressionExecutor;
     private final ConcurrentHashMap<Integer, CompletableFuture<LRFChunkEntry>> loadingChunks;
     private final AtomicBoolean isClosed;
+    private final java.util.Queue<QueuedChunk> waitingQueue;
+    private final AtomicInteger queueSize;
     
     // Configuration
     private final int loadThreads;
@@ -57,6 +59,7 @@ public class ChunkBatchLoader implements AutoCloseable {
     private final Object readerLock = new Object();
     private final long readerRefreshIntervalMs;
     private volatile long lastReaderRefresh;
+    private volatile long lastFileModified;
     
     /**
      * Create a new batch loader with default configuration.
@@ -105,6 +108,8 @@ public class ChunkBatchLoader implements AutoCloseable {
         
         this.loadingChunks = new ConcurrentHashMap<>();
         this.isClosed = new AtomicBoolean(false);
+        this.waitingQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
+        this.queueSize = new AtomicInteger(0);
         this.chunksLoaded = new AtomicInteger(0);
         this.chunksDecompressed = new AtomicInteger(0);
         this.cacheHits = new AtomicInteger(0);
@@ -112,6 +117,13 @@ public class ChunkBatchLoader implements AutoCloseable {
         this.totalLoadTime = new AtomicLong(0);
         this.totalDecompressionTime = new AtomicLong(0);
         this.lastReaderRefresh = System.currentTimeMillis();
+        
+        // Initialize file modification time
+        try {
+            this.lastFileModified = java.nio.file.Files.getLastModifiedTime(regionPath).toMillis();
+        } catch (IOException e) {
+            this.lastFileModified = 0;
+        }
         
         // Initialize region reader
         refreshRegionReader();
@@ -145,9 +157,27 @@ public class ChunkBatchLoader implements AutoCloseable {
             return existing;
         }
         
-        // Check concurrent load limit
+        // Check concurrent load limit - use queue instead of rejecting
         if (loadingChunks.size() >= maxConcurrentLoads) {
-            return CompletableFuture.completedFuture(null); // Backpressure
+            // Add to waiting queue with timeout
+            QueuedChunk queued = new QueuedChunk(chunkX, chunkZ, System.currentTimeMillis() + 5000); // 5s timeout
+            waitingQueue.offer(queued);
+            queueSize.incrementAndGet();
+            
+            // Return future that will complete when processed
+            return CompletableFuture.supplyAsync(() -> {
+                try {
+                    while (!queued.isExpired() && !isClosed.get()) {
+                        Thread.sleep(10); // Poll every 10ms
+                        if (queued.future != null) {
+                            return queued.future.get();
+                        }
+                    }
+                    return null; // Timeout or closed
+                } catch (Exception e) {
+                    return null;
+                }
+            });
         }
         
         cacheMisses.incrementAndGet();
@@ -158,6 +188,8 @@ public class ChunkBatchLoader implements AutoCloseable {
             .thenComposeAsync(this::decompressChunk, decompressionExecutor)
             .whenComplete((result, throwable) -> {
                 loadingChunks.remove(chunkIndex);
+                processWaitingQueue(); // Process next in queue
+                
                 if (throwable != null) {
                     System.err.println("[TurboMC] Error loading chunk " + chunkX + "," + chunkZ + ": " + throwable.getMessage());
                 } else if (result != null) {
@@ -167,6 +199,22 @@ public class ChunkBatchLoader implements AutoCloseable {
         
         loadingChunks.put(chunkIndex, future);
         return future;
+    }
+    
+    /**
+     * Process chunks waiting in queue.
+     */
+    private void processWaitingQueue() {
+        while (!waitingQueue.isEmpty() && loadingChunks.size() < maxConcurrentLoads) {
+            QueuedChunk queued = waitingQueue.poll();
+            if (queued != null && !queued.isExpired()) {
+                queueSize.decrementAndGet();
+                // Load the queued chunk
+                CompletableFuture<LRFChunkEntry> future = loadChunk(queued.chunkX, queued.chunkZ);
+                queued.future = future;
+                break; // Process one at a time
+            }
+        }
     }
     
     /**
@@ -232,9 +280,12 @@ public class ChunkBatchLoader implements AutoCloseable {
         long startTime = System.currentTimeMillis();
         
         try {
-            // Refresh region reader if needed
-            if (System.currentTimeMillis() - lastReaderRefresh > readerRefreshIntervalMs) {
+            // Smart refresh: only if file has been modified
+            long currentFileModified = java.nio.file.Files.getLastModifiedTime(regionPath).toMillis();
+            if (currentFileModified > lastFileModified || 
+                System.currentTimeMillis() - lastReaderRefresh > readerRefreshIntervalMs) {
                 refreshRegionReader();
+                lastFileModified = currentFileModified;
             }
             
             LRFRegionReader reader = getRegionReader();
@@ -484,6 +535,26 @@ public class ChunkBatchLoader implements AutoCloseable {
                     chunksLoaded, chunksDecompressed, getCacheHitRate(), 
                     getAvgLoadTime(), getAvgDecompressionTime(), currentlyLoading,
                     loadThreads, decompressionThreads);
+        }
+    }
+    
+    /**
+     * Container for queued chunks with timeout.
+     */
+    private static class QueuedChunk {
+        final int chunkX;
+        final int chunkZ;
+        final long expireTime;
+        volatile CompletableFuture<LRFChunkEntry> future;
+        
+        QueuedChunk(int chunkX, int chunkZ, long expireTime) {
+            this.chunkX = chunkX;
+            this.chunkZ = chunkZ;
+            this.expireTime = expireTime;
+        }
+        
+        boolean isExpired() {
+            return System.currentTimeMillis() > expireTime;
         }
     }
 }

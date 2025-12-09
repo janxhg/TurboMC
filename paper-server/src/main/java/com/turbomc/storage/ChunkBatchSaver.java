@@ -45,6 +45,8 @@ public class ChunkBatchSaver implements AutoCloseable {
     private final int writeThreads;
     private final int batchSize;
     private final int compressionType;
+    private final long autoFlushDelayMs;
+    private volatile long lastFlushTime;
     
     /**
      * Create a new batch saver with default configuration.
@@ -70,11 +72,28 @@ public class ChunkBatchSaver implements AutoCloseable {
      */
     public ChunkBatchSaver(Path regionPath, int compressionType, 
                           int compressionThreads, int writeThreads, int batchSize) {
+        this(regionPath, compressionType, compressionThreads, writeThreads, batchSize, 100); // 100ms default delay
+    }
+    
+    /**
+     * Create a new batch saver with custom configuration including auto-flush delay.
+     * 
+     * @param regionPath Path to the LRF region file
+     * @param compressionType Compression algorithm to use
+     * @param compressionThreads Number of compression threads
+     * @param writeThreads Number of write threads
+     * @param batchSize Maximum chunks per batch
+     * @param autoFlushDelayMs Delay before auto-flush when batch is full
+     */
+    public ChunkBatchSaver(Path regionPath, int compressionType, 
+                          int compressionThreads, int writeThreads, int batchSize, long autoFlushDelayMs) {
         this.regionPath = regionPath;
         this.compressionType = compressionType;
         this.compressionThreads = compressionThreads;
         this.writeThreads = writeThreads;
         this.batchSize = batchSize;
+        this.autoFlushDelayMs = autoFlushDelayMs;
+        this.lastFlushTime = System.currentTimeMillis();
         
         this.compressionExecutor = Executors.newFixedThreadPool(compressionThreads, r -> {
             Thread t = new Thread(r, "ChunkBatchSaver-Compression-" + System.currentTimeMillis());
@@ -117,9 +136,24 @@ public class ChunkBatchSaver implements AutoCloseable {
         synchronized (pendingChunks) {
             pendingChunks.add(chunk);
             
-            // Auto-flush if batch is full
+            // Smart auto-flush: check if batch is full AND enough time has passed
             if (pendingChunks.size() >= batchSize) {
-                return flushBatch();
+                long timeSinceLastFlush = System.currentTimeMillis() - lastFlushTime;
+                if (timeSinceLastFlush >= autoFlushDelayMs) {
+                    lastFlushTime = System.currentTimeMillis();
+                    return flushBatch();
+                } else {
+                    // Schedule delayed flush to allow more chunks to accumulate
+                    return CompletableFuture
+                        .runAsync(() -> {
+                            try {
+                                Thread.sleep(autoFlushDelayMs - timeSinceLastFlush);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                            }
+                        })
+                        .thenCompose(v -> flushBatch());
+                }
             }
         }
         
@@ -171,8 +205,8 @@ public class ChunkBatchSaver implements AutoCloseable {
             pendingChunks.clear();
         }
         
-        return CompletableFuture
-            .supplyAsync(() -> compressBatch(currentBatch), compressionExecutor)
+        return CompletableFuture.completedFuture(null)
+            .thenComposeAsync(v -> compressBatch(currentBatch), compressionExecutor)
             .thenComposeAsync(compressedChunks -> writeBatch(compressedChunks), writeExecutor)
             .whenComplete((result, throwable) -> {
                 if (throwable != null) {
@@ -185,10 +219,9 @@ public class ChunkBatchSaver implements AutoCloseable {
     }
     
     /**
-     * Compress a batch of chunks in parallel.
+     * Compress a batch of chunks in parallel (fully async).
      */
-    private List<CompressedChunk> compressBatch(List<LRFChunkEntry> chunks) {
-        List<CompressedChunk> compressed = new ArrayList<>(chunks.size());
+    private CompletableFuture<List<CompressedChunk>> compressBatch(List<LRFChunkEntry> chunks) {
         List<CompletableFuture<CompressedChunk>> futures = new ArrayList<>();
         
         for (LRFChunkEntry chunk : chunks) {
@@ -197,17 +230,24 @@ public class ChunkBatchSaver implements AutoCloseable {
             futures.add(future);
         }
         
-        for (CompletableFuture<CompressedChunk> future : futures) {
-            try {
-                compressed.add(future.get());
-                chunksCompressed.incrementAndGet();
-            } catch (Exception e) {
-                System.err.println("[TurboMC] Error compressing chunk: " + e.getMessage());
-                // Continue with other chunks
-            }
-        }
-        
-        return compressed;
+        // Wait for all compression to complete asynchronously
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+            .thenApply(v -> {
+                List<CompressedChunk> compressed = new ArrayList<>(chunks.size());
+                for (CompletableFuture<CompressedChunk> future : futures) {
+                    try {
+                        CompressedChunk result = future.get();
+                        if (result != null) {
+                            compressed.add(result);
+                            chunksCompressed.incrementAndGet();
+                        }
+                    } catch (Exception e) {
+                        System.err.println("[TurboMC] Error compressing chunk: " + e.getMessage());
+                        // Continue with other chunks
+                    }
+                }
+                return compressed;
+            });
     }
     
     /**
