@@ -1,6 +1,7 @@
 package com.turbomc.storage;
 
 import com.turbomc.config.TurboConfig;
+import com.turbomc.storage.ConversionMode;
 
 import java.nio.file.Path;
 import java.nio.file.Files;
@@ -79,15 +80,28 @@ public final class TurboLRFBootstrap {
             // Log storage configuration
             String storageFormat = config.getStorageFormat();
             boolean autoConvert = config.isAutoConvertEnabled();
-            String conversionMode = config.getConversionMode();
+            ConversionMode conversionMode = config.getConversionModeEnum();
 
             System.out.println("[TurboMC][LRF] Storage Format: " + storageFormat);
             System.out.println("[TurboMC][LRF] Auto-Convert: " + autoConvert);
-            System.out.println("[TurboMC][LRF] Conversion Mode: " + conversionMode);
+            System.out.println("[TurboMC][LRF] Conversion Mode: " + conversionMode.getConfigValue());
 
-            // If auto-convert is enabled, migrate worlds
+            // If auto-convert is enabled, show mode-specific message
             if (autoConvert) {
-                System.out.println("[TurboMC][LRF] Auto-convert enabled. Worlds will be migrated on load.");
+                switch (conversionMode) {
+                    case FULL_LRF:
+                        System.out.println("[TurboMC][LRF] Full LRF conversion enabled. All MCA files will be converted at startup.");
+                        break;
+                    case ON_DEMAND:
+                        System.out.println("[TurboMC][LRF] On-demand conversion enabled. MCA files will be converted as chunks are loaded.");
+                        break;
+                    case BACKGROUND:
+                        System.out.println("[TurboMC][LRF] Background conversion enabled. MCA files will be converted during idle server time.");
+                        break;
+                    case MANUAL:
+                        System.out.println("[TurboMC][LRF] Manual conversion mode. Use conversion API to convert MCA files.");
+                        break;
+                }
             }
 
             System.out.println("[TurboMC][LRF] LRF storage system initialized successfully.");
@@ -113,9 +127,54 @@ public final class TurboLRFBootstrap {
     public static void migrateWorldIfNeeded(Path worldDirectory) {
         try {
             TurboConfig config = TurboConfig.getInstance();
-            config.migrateWorldRegionsIfNeeded(worldDirectory);
+            ConversionMode conversionMode = config.getConversionModeEnum();
+            
+            // Only migrate if automatic conversion is enabled
+            if (conversionMode.isAutomaticConversion()) {
+                config.migrateWorldRegionsIfNeeded(worldDirectory);
+            }
         } catch (Exception e) {
             System.err.println("[TurboMC][LRF] Failed to migrate world: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * Perform full LRF migration for all worlds during startup.
+     * Should be called during server initialization when FULL_LRF mode is enabled.
+     * 
+     * @param serverDirectory the server root directory
+     */
+    public static void performFullLRFMigration(Path serverDirectory) {
+        try {
+            TurboConfig config = TurboConfig.getInstance(serverDirectory.toFile());
+            ConversionMode conversionMode = config.getConversionModeEnum();
+            
+            if (conversionMode != ConversionMode.FULL_LRF) {
+                return; // Only run in FULL_LRF mode
+            }
+            
+            if (!config.isAutoConvertEnabled()) {
+                return; // Auto-convert must be enabled
+            }
+            
+            System.out.println("[TurboMC][LRF] Starting full LRF migration for all worlds...");
+            
+            // Common world directories
+            String[] worldNames = {"world", "world_nether", "world_the_end"};
+            
+            for (String worldName : worldNames) {
+                Path worldDir = serverDirectory.resolve(worldName);
+                if (Files.isDirectory(worldDir)) {
+                    System.out.println("[TurboMC][LRF] Migrating world: " + worldName);
+                    config.migrateWorldRegionsIfNeeded(worldDir);
+                }
+            }
+            
+            System.out.println("[TurboMC][LRF] Full LRF migration completed for all worlds.");
+            
+        } catch (Exception e) {
+            System.err.println("[TurboMC][LRF] Failed to perform full LRF migration: " + e.getMessage());
             e.printStackTrace();
         }
     }

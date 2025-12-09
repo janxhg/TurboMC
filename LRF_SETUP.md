@@ -23,7 +23,7 @@ format = "lrf"
 # Automatically convert MCA to LRF when loading chunks
 auto-convert = true
 
-# Conversion mode: "on-demand" (convert as chunks load), "background" (idle time), or "manual"
+# Conversion mode: "on-demand" (convert as chunks load), "background" (idle time), "full-lrf" (convert all at startup), or "manual"
 conversion-mode = "on-demand"
 ```
 
@@ -34,6 +34,28 @@ conversion-mode = "on-demand"
 - `format = "auto"` - Auto-detect based on existing files
 - `auto-convert = true` - Automatically migrate regions to LRF
 - `auto-convert = false` - Manual conversion only
+
+**Conversion Modes:**
+
+- `conversion-mode = "on-demand"` - Convert MCA → LRF gradually as chunks are loaded (default)
+  - **Pros**: Lower startup time, gradual conversion
+  - **Cons**: Slower initial performance, conversion happens during gameplay
+  - **Best for**: Large servers with many worlds
+
+- `conversion-mode = "background"` - Convert MCA → LRF during server idle time
+  - **Pros**: Balanced approach, intelligent scheduling during low load
+  - **Cons**: Requires idle time detection, conversion timing depends on server activity
+  - **Best for**: Medium servers that want balanced performance
+
+- `conversion-mode = "full-lrf"` - Convert ALL MCA → LRF files during server startup
+  - **Pros**: Maximum optimization from start, consistent performance
+  - **Cons**: Higher startup time, requires more disk space temporarily
+  - **Best for**: Small servers, fresh installations, maximum performance
+
+- `conversion-mode = "manual"` - No automatic conversion
+  - **Pros**: Full control over conversion timing
+  - **Cons**: Requires manual intervention
+  - **Best for**: Advanced users who want to control conversion process
 
 ### 2. `paper-global.yml` - Paper Storage Configuration
 

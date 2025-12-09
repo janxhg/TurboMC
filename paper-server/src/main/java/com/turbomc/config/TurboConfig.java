@@ -4,6 +4,7 @@ import com.moandjiezana.toml.Toml;
 import com.turbomc.storage.StorageFormat;
 import com.turbomc.storage.TurboStorageConfig;
 import com.turbomc.storage.TurboStorageMigrator;
+import com.turbomc.storage.ConversionMode;
 
 import java.io.File;
 import java.io.IOException;
@@ -83,7 +84,7 @@ public class TurboConfig {
                 # Automatically convert MCA to LRF when loading chunks
                 auto-convert = true
                 
-                # Conversion mode: "on-demand" (convert as chunks load), "background" (idle time), or "manual"
+                # Conversion mode: "on-demand" (convert as chunks load), "background" (idle time), "full-lrf" (convert all at startup), or "manual"
                 conversion-mode = "on-demand"
                 
                 [version-control]
@@ -209,6 +210,16 @@ public class TurboConfig {
     
     public String getConversionMode() {
         return toml.getString("storage.conversion-mode", "on-demand");
+    }
+    
+    /**
+     * Get the conversion mode as a ConversionMode enum.
+     * 
+     * @return Conversion mode enum (defaults to ON_DEMAND)
+     */
+    public ConversionMode getConversionModeEnum() {
+        String modeStr = getConversionMode();
+        return ConversionMode.fromString(modeStr);
     }
     
     /**
