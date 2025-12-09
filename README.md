@@ -2,7 +2,7 @@
 
 | TurboMC Version | Minecraft Version | Upstream            |
 |:---------------:|:-----------------:|:-------------------:|
-| **v1.1.0**      | **1.21.10**        | Fork of **PaperMC** |
+| **v1.2.0**      | **1.21.10**        | Fork of **PaperMC** |
 
 **TurboMC** is a high-performance fork of [Paper](https://github.com/PaperMC/Paper), designed for extreme scalability and optimized specifically for high-density entity scenarios and proxy-based setups.
 
