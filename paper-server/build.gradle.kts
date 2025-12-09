@@ -27,6 +27,9 @@ dependencies {
     implementation("org.lz4:lz4-java:1.8.0")
     implementation("com.moandjiezana.toml:toml4j:0.7.2")
     
+    // TurboMC - YAML Support for paper-global.yml fallback (v1.3.0)
+    implementation("org.yaml:snakeyaml:2.2")
+    
     // TurboMC - ViaVersion Multi-Version Support (v1.3.0 - API compatibility work in progress)
     // NOTE: ViaVersion 5.1.1 API has numerous breaking changes from previous versions.
     // Integration will be completed in v1.3.0 after API adapter layer is implemented.
@@ -266,7 +269,8 @@ tasks.jar {
 }
 
 tasks.test {
-    include("**/**TestSuite.class")
+    include("**/*Test.class")
+    include("**/*TestSuite.class")
     workingDir = temporaryDir
     useJUnitPlatform {
         forkEvery = 1

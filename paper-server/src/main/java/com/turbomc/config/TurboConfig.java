@@ -1,12 +1,19 @@
 package com.turbomc.config;
 
 import com.moandjiezana.toml.Toml;
+import com.turbomc.storage.StorageFormat;
+import com.turbomc.storage.TurboStorageConfig;
+import com.turbomc.storage.TurboStorageMigrator;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
+import org.yaml.snakeyaml.Yaml;
 
 /**
  * TurboMC configuration loader and manager.
@@ -16,16 +23,21 @@ public class TurboConfig {
     private static TurboConfig instance;
     private final Toml toml;
     private final File configFile;
+    private final File serverDirectory;
     
     private TurboConfig(File serverDirectory) {
         this.configFile = new File(serverDirectory, "turbo.toml");
+        this.serverDirectory = serverDirectory;
         
-        // Create default config if it doesn't exist
-        if (!configFile.exists()) {
-            createDefaultConfig();
+        // Try to load from turbo.toml first, fallback to paper-global.yml
+        if (configFile.exists()) {
+            this.toml = new Toml().read(configFile);
+            System.out.println("[TurboMC][CFG] Loaded configuration from turbo.toml");
+        } else {
+            // Fallback to YAML
+            this.toml = loadFromYaml();
+            System.out.println("[TurboMC][CFG] Loaded configuration from paper-global.yml (turbo.toml not found)");
         }
-        
-        this.toml = new Toml().read(configFile);
     }
     
     public static TurboConfig getInstance(File serverDirectory) {
@@ -66,10 +78,10 @@ public class TurboConfig {
                 
                 [storage]
                 # Region file format: "auto" (detect), "lrf" (optimized), or "mca" (vanilla)
-                format = "auto"
+                format = "lrf"
                 
                 # Automatically convert MCA to LRF when loading chunks
-                auto-convert = false
+                auto-convert = true
                 
                 # Conversion mode: "on-demand" (convert as chunks load), "background" (idle time), or "manual"
                 conversion-mode = "on-demand"
@@ -86,9 +98,84 @@ public class TurboConfig {
                 """;
             
             Files.writeString(configFile.toPath(), defaultConfig);
-            System.out.println("[TurboMC] Created default configuration file: turbo.toml");
+            System.out.println("[TurboMC][CFG] Created default turbo.toml with production defaults.");
         } catch (IOException e) {
             System.err.println("[TurboMC] Failed to create default turbo.toml: " + e.getMessage());
+        }
+    }
+
+    private Toml loadFromYaml() {
+        try {
+            Path configDir = serverDirectory.toPath().resolve("config");
+            Path globalYml = configDir.resolve("paper-global.yml");
+            
+            if (!Files.exists(globalYml)) {
+                // Create default TOML since YAML doesn't exist either
+                createDefaultConfig();
+                return new Toml().read(configFile);
+            }
+            
+            // Read YAML and extract turbo section
+            Yaml yaml = new Yaml();
+            Map<String, Object> data = yaml.load(Files.readString(globalYml));
+            Map<String, Object> turboSection = (Map<String, Object>) data.get("turbo");
+            
+            if (turboSection == null) {
+                System.err.println("[TurboMC][CFG] No 'turbo' section found in paper-global.yml. Using defaults.");
+                createDefaultConfig();
+                return new Toml().read(configFile);
+            }
+            
+            // Convert YAML structure to TOML-like map
+            Map<String, Object> tomlMap = new HashMap<>();
+            
+            // Compression section
+            Map<String, Object> compression = (Map<String, Object>) turboSection.get("compression");
+            if (compression != null) {
+                tomlMap.put("compression", compression);
+            }
+            
+            // Storage section
+            Map<String, Object> storage = (Map<String, Object>) turboSection.get("storage");
+            if (storage != null) {
+                tomlMap.put("storage", storage);
+            }
+            
+            // Version control section
+            Map<String, Object> versionControl = (Map<String, Object>) turboSection.get("version-control");
+            if (versionControl != null) {
+                tomlMap.put("version-control", versionControl);
+            }
+            
+            // Create a temporary TOML from the map - convert to TOML string format
+            StringBuilder tomlBuilder = new StringBuilder();
+            if (tomlMap.containsKey("compression")) {
+                Map<String, Object> comp = (Map<String, Object>) tomlMap.get("compression");
+                tomlBuilder.append("[compression]\n");
+                for (Map.Entry<String, Object> entry : comp.entrySet()) {
+                    tomlBuilder.append(entry.getKey()).append(" = ").append(entry.getValue()).append("\n");
+                }
+            }
+            if (tomlMap.containsKey("storage")) {
+                Map<String, Object> storageSection = (Map<String, Object>) tomlMap.get("storage");
+                tomlBuilder.append("[storage]\n");
+                for (Map.Entry<String, Object> entry : storageSection.entrySet()) {
+                    tomlBuilder.append(entry.getKey()).append(" = ").append(entry.getValue()).append("\n");
+                }
+            }
+            if (tomlMap.containsKey("version-control")) {
+                Map<String, Object> version = (Map<String, Object>) tomlMap.get("version-control");
+                tomlBuilder.append("[version-control]\n");
+                for (Map.Entry<String, Object> entry : version.entrySet()) {
+                    tomlBuilder.append(entry.getKey()).append(" = ").append(entry.getValue()).append("\n");
+                }
+            }
+            return new Toml().read(tomlBuilder.toString());
+            
+        } catch (Exception e) {
+            System.err.println("[TurboMC][CFG] Failed to load from paper-global.yml: " + e.getMessage());
+            createDefaultConfig();
+            return new Toml().read(configFile);
         }
     }
     
@@ -122,6 +209,35 @@ public class TurboConfig {
     
     public String getConversionMode() {
         return toml.getString("storage.conversion-mode", "on-demand");
+    }
+    
+    /**
+     * Get the storage configuration as TurboStorageConfig.
+     * Maps turbo.toml [storage] section to TurboStorageConfig.
+     */
+    public TurboStorageConfig getStorageConfig() {
+        String formatStr = getStorageFormat();
+        boolean autoMigrate = isAutoConvertEnabled();
+        
+        // Map "auto" to MCA for now (can be enhanced to detect actual format)
+        StorageFormat format = "auto".equalsIgnoreCase(formatStr) ? StorageFormat.MCA : 
+                              StorageFormat.fromString(formatStr);
+        
+        return new TurboStorageConfig(format, autoMigrate);
+    }
+    
+    /**
+     * Run world region migration if auto-convert is enabled.
+     * Should be called during server startup before worlds are loaded.
+     */
+    public void migrateWorldRegionsIfNeeded(Path worldDirectory) {
+        try {
+            TurboStorageConfig storageCfg = getStorageConfig();
+            TurboStorageMigrator.migrateWorldIfNeeded(worldDirectory, storageCfg);
+        } catch (IOException e) {
+            System.err.println("[TurboMC] Failed to migrate world regions: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
     
     // === Version Control Settings ===
