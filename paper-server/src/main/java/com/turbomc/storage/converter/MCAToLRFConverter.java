@@ -137,7 +137,7 @@ public class MCAToLRFConverter {
         
         if (mcaFiles.isEmpty()) {
             System.out.println("[TurboMC] No .mca files found in " + sourceDir);
-            return new BatchConversionResult(0, 0, 0, 0, 0);
+            return new BatchConversionResult(0, 0, 0, 0L, 0L, 0L);
         }
         
         System.out.println("[TurboMC] Converting " + mcaFiles.size() + " region files...");
