@@ -64,6 +64,16 @@ public class TurboConfig {
                 # Enable fallback to zlib if LZ4 decompression fails
                 fallback-enabled = true
                 
+                [storage]
+                # Region file format: "auto" (detect), "lrf" (optimized), or "mca" (vanilla)
+                format = "auto"
+                
+                # Automatically convert MCA to LRF when loading chunks
+                auto-convert = false
+                
+                # Conversion mode: "on-demand" (convert as chunks load), "background" (idle time), or "manual"
+                conversion-mode = "on-demand"
+                
                 [version-control]
                 # Minimum Minecraft version allowed to connect (e.g., "1.20.1")
                 minimum-version = "1.20.1"
@@ -100,7 +110,22 @@ public class TurboConfig {
         return toml.getBoolean("compression.fallback-enabled", true);
     }
     
+    // === Storage Settings ===
+    
+    public String getStorageFormat() {
+        return toml.getString("storage.format", "auto");
+    }
+    
+    public boolean isAutoConvertEnabled() {
+        return toml.getBoolean("storage.auto-convert", false);
+    }
+    
+    public String getConversionMode() {
+        return toml.getString("storage.conversion-mode", "on-demand");
+    }
+    
     // === Version Control Settings ===
+
     
     public String getMinimumVersion() {
         return toml.getString("version-control.minimum-version", "1.20.1");
