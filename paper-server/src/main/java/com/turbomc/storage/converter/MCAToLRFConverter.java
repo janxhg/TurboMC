@@ -1,12 +1,19 @@
 package com.turbomc.storage.converter;
 
-import com.turbomc.storage.*;
 import com.turbomc.config.TurboConfig;
+import com.turbomc.compression.TurboCompressionService;
+import com.turbomc.storage.AnvilRegionReader;
+import com.turbomc.storage.LRFChunkEntry;
+import com.turbomc.storage.LRFConstants;
+import com.turbomc.storage.LRFRegionWriter;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Converts Minecraft Anvil (.mca) region files to Linear Region Format (.lrf).
@@ -21,6 +28,15 @@ public class MCAToLRFConverter {
     private long totalBytesWritten;
     private int totalChunksConverted;
     
+    // Performance optimizations
+    private final AtomicLong conversionTime;
+    private final AtomicLong compressionTime;
+    private final int batchSize;
+    private final ByteBuffer ioBuffer;
+    
+    // Streaming support
+    private boolean streamingMode;
+    
     /**
      * Create a new MCA to LRF converter.
      * 
@@ -31,6 +47,13 @@ public class MCAToLRFConverter {
         this.totalBytesRead = 0;
         this.totalBytesWritten = 0;
         this.totalChunksConverted = 0;
+        
+        // Initialize performance components
+        this.conversionTime = new AtomicLong(0);
+        this.compressionTime = new AtomicLong(0);
+        this.batchSize = LRFConstants.BATCH_SIZE;
+        this.ioBuffer = ByteBuffer.allocate(LRFConstants.STREAM_BUFFER_SIZE);
+        this.streamingMode = false;
     }
     
     /**
@@ -41,7 +64,18 @@ public class MCAToLRFConverter {
     }
     
     /**
-     * Convert a single MCA file to LRF.
+     * Enable streaming mode for large conversions.
+     * Processes chunks in batches to reduce memory usage.
+     */
+    public void enableStreaming() {
+        this.streamingMode = true;
+        if (verbose) {
+            System.out.println("[TurboMC] Enabled streaming mode for MCA→LRF conversion");
+        }
+    }
+    
+    /**
+     * Convert a single MCA file to LRF with streaming support.
      * 
      * @param mcaPath Path to .mca file
      * @param lrfPath Path to output .lrf file
@@ -50,6 +84,9 @@ public class MCAToLRFConverter {
      * @throws IOException if conversion fails
      */
     public ConversionResult convert(Path mcaPath, Path lrfPath, int compressionType) throws IOException {
+        long startTime = System.currentTimeMillis();
+        long conversionStart = System.nanoTime();
+        
         if (!Files.exists(mcaPath)) {
             throw new IOException("Source file does not exist: " + mcaPath);
         }
@@ -58,12 +95,95 @@ public class MCAToLRFConverter {
             throw new IllegalArgumentException("Source must be .mca file: " + mcaPath);
         }
         
-        long startTime = System.currentTimeMillis();
-        
         if (verbose) {
             System.out.println("[TurboMC] Converting: " + mcaPath.getFileName() + " → " + lrfPath.getFileName());
         }
         
+        if (streamingMode) {
+            return convertStreaming(mcaPath, lrfPath, compressionType, startTime, conversionStart);
+        } else {
+            return convertBatch(mcaPath, lrfPath, compressionType, startTime, conversionStart);
+        }
+    }
+    /**
+     * Convert in streaming mode - processes chunks in batches.
+     */
+    private ConversionResult convertStreaming(Path mcaPath, Path lrfPath, int compressionType,
+                                           long startTime, long conversionStart) throws IOException {
+        long mcaSize = Files.size(mcaPath);
+        int chunksConverted = 0;
+        long lrfSize = 0;
+        
+        try (AnvilRegionReader reader = new AnvilRegionReader(mcaPath);
+             LRFRegionWriter writer = new LRFRegionWriter(lrfPath, compressionType)) {
+            
+            writer.enableStreaming();
+            
+            // Process chunks in batches
+            List<LRFChunkEntry> batch = new ArrayList<>(batchSize);
+            
+            for (int x = 0; x < LRFConstants.REGION_SIZE; x++) {
+                for (int z = 0; z < LRFConstants.REGION_SIZE; z++) {
+                    if (reader.hasChunk(x, z)) {
+                        LRFChunkEntry chunk = reader.readChunk(x, z);
+                        if (chunk != null) {
+                            batch.add(chunk);
+                            
+                            // Process batch when full
+                            if (batch.size() >= batchSize) {
+                                for (LRFChunkEntry batchChunk : batch) {
+                                    writer.addChunk(batchChunk);
+                                }
+                                chunksConverted += batch.size();
+                                batch.clear();
+                                
+                                // Progress indicator
+                                if (verbose && chunksConverted % 50 == 0) {
+                                    System.out.println("[TurboMC] Streaming progress: " + chunksConverted + " chunks");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Process remaining chunks
+            for (LRFChunkEntry remainingChunk : batch) {
+                writer.addChunk(remainingChunk);
+            }
+            chunksConverted += batch.size();
+            
+            writer.flush();
+            lrfSize = Files.size(lrfPath);
+        }
+        
+        // Update statistics
+        totalBytesRead += mcaSize;
+        totalBytesWritten += lrfSize;
+        totalChunksConverted += chunksConverted;
+        conversionTime.addAndGet(System.nanoTime() - conversionStart);
+        
+        // Handle original file cleanup
+        handleOriginalFile(mcaPath, lrfSize, chunksConverted);
+        
+        long elapsed = System.currentTimeMillis() - startTime;
+        
+        ConversionResult result = new ConversionResult(
+            mcaPath, lrfPath, chunksConverted, mcaSize, lrfSize, elapsed
+        );
+        
+        if (verbose) {
+            System.out.println(result);
+        }
+        
+        return result;
+    }
+    
+    /**
+     * Convert in batch mode - original behavior.
+     */
+    private ConversionResult convertBatch(Path mcaPath, Path lrfPath, int compressionType,
+                                       long startTime, long conversionStart) throws IOException {
         // Read all chunks from MCA
         List<LRFChunkEntry> chunks;
         long mcaSize;
@@ -91,49 +211,16 @@ public class MCAToLRFConverter {
             lrfSize = Files.size(lrfPath);
         }
         
-        // Eliminar el archivo .mca original después de conversión exitosa
-        if (lrfSize > 0 && chunks.size() > 0) {
-            try {
-                // Verificar si se debe hacer backup usando configuración de TurboConfig
-                boolean shouldBackup = false;
-                try {
-                    TurboConfig config = TurboConfig.getInstance();
-                    shouldBackup = config.isBackupMcaEnabled();
-                } catch (Exception e) {
-                    // Si TurboConfig no está disponible, usar valor por defecto (false)
-                    shouldBackup = false;
-                }
-                
-                if (shouldBackup) {
-                    // Crear directorio de backup
-                    Path backupDir = mcaPath.getParent().resolve("backup_mca");
-                    Files.createDirectories(backupDir);
-                    Path backupPath = backupDir.resolve(mcaPath.getFileName());
-                    
-                    // Mover archivo a backup en lugar de eliminar
-                    Files.move(mcaPath, backupPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                    if (verbose) {
-                        System.out.println("[TurboMC] Backed up original: " + mcaPath.getFileName() + " → backup_mca/");
-                    }
-                } else {
-                    // Eliminar directamente
-                    Files.delete(mcaPath);
-                    if (verbose) {
-                        System.out.println("[TurboMC] Removed original: " + mcaPath.getFileName());
-                    }
-                }
-            } catch (IOException e) {
-                System.err.println("[TurboMC] Warning: Failed to delete original .mca file: " + e.getMessage());
-                // No lanzar excepción, la conversión fue exitosa
-            }
-        }
-        
-        long elapsed = System.currentTimeMillis() - startTime;
-        
-        // Update totals
+        // Update statistics
         totalBytesRead += mcaSize;
         totalBytesWritten += lrfSize;
         totalChunksConverted += chunks.size();
+        conversionTime.addAndGet(System.nanoTime() - conversionStart);
+        
+        // Handle original file cleanup
+        handleOriginalFile(mcaPath, lrfSize, chunks.size());
+        
+        long elapsed = System.currentTimeMillis() - startTime;
         
         ConversionResult result = new ConversionResult(
             mcaPath, lrfPath, chunks.size(), mcaSize, lrfSize, elapsed
@@ -147,10 +234,96 @@ public class MCAToLRFConverter {
     }
     
     /**
+     * Handle cleanup of original MCA file.
+     */
+    private void handleOriginalFile(Path mcaPath, long lrfSize, int chunkCount) {
+        if (lrfSize > 0 && chunkCount > 0) {
+            try {
+                // Check if backup is enabled
+                boolean shouldBackup = false;
+                try {
+                    TurboConfig config = TurboConfig.getInstance();
+                    shouldBackup = config.isBackupMcaEnabled();
+                } catch (Exception e) {
+                    shouldBackup = false;
+                }
+                
+                if (shouldBackup) {
+                    // Create backup directory
+                    Path backupDir = mcaPath.getParent().resolve("backup_mca");
+                    Files.createDirectories(backupDir);
+                    Path backupPath = backupDir.resolve(mcaPath.getFileName());
+                    
+                    // Move file to backup
+                    Files.move(mcaPath, backupPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    if (verbose) {
+                        System.out.println("[TurboMC] Backed up original: " + mcaPath.getFileName() + " → backup_mca/");
+                    }
+                } else {
+                    // Delete directly
+                    Files.delete(mcaPath);
+                    if (verbose) {
+                        System.out.println("[TurboMC] Removed original: " + mcaPath.getFileName());
+                    }
+                }
+            } catch (IOException e) {
+                System.err.println("[TurboMC] Warning: Failed to delete original .mca file: " + e.getMessage());
+            }
+        }
+    }
+    
+    /**
      * Convert with default LZ4 compression.
      */
     public ConversionResult convert(Path mcaPath, Path lrfPath) throws IOException {
         return convert(mcaPath, lrfPath, LRFConstants.COMPRESSION_LZ4);
+    }
+    
+    /**
+     * Get conversion statistics.
+     */
+    public ConversionStats getConversionStats() {
+        return new ConversionStats(
+            totalChunksConverted,
+            totalBytesRead,
+            totalBytesWritten,
+            conversionTime.get()
+        );
+    }
+    
+    /**
+     * Conversion statistics holder.
+     */
+    public static class ConversionStats {
+        public final int totalChunks;
+        public final long totalBytesRead;
+        public final long totalBytesWritten;
+        public final long totalConversionTime;
+        
+        public ConversionStats(int chunks, long bytesRead, long bytesWritten, long time) {
+            this.totalChunks = chunks;
+            this.totalBytesRead = bytesRead;
+            this.totalBytesWritten = bytesWritten;
+            this.totalConversionTime = time;
+        }
+        
+        public double getCompressionRatio() {
+            return totalBytesRead > 0 ? (double) totalBytesWritten / totalBytesRead : 0;
+        }
+        
+        public double getAvgConversionTime() {
+            return totalChunks > 0 ? (double) totalConversionTime / totalChunks / 1_000_000 : 0;
+        }
+        
+        @Override
+        public String toString() {
+            return String.format("ConversionStats{chunks=%d, read=%.1fMB, wrote=%.1fMB, ratio=%.1f%%, avgTime=%.2fms}",
+                    totalChunks, 
+                    totalBytesRead / 1024.0 / 1024.0,
+                    totalBytesWritten / 1024.0 / 1024.0,
+                    getCompressionRatio() * 100,
+                    getAvgConversionTime());
+        }
     }
     
     /**
@@ -198,8 +371,9 @@ public class MCAToLRFConverter {
                     System.out.println("[TurboMC] Progress: " + successful + "/" + mcaFiles.size() + " files");
                 }
                 
-            } catch (IOException e) {
+            } catch (Exception e) {
                 System.err.println("[TurboMC] Failed to convert " + mcaPath.getFileName() + ": " + e.getMessage());
+                e.printStackTrace();
                 failed++;
             }
         }

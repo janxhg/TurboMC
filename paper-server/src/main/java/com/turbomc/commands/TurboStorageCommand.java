@@ -57,6 +57,8 @@ public class TurboStorageCommand {
                     .executes(TurboStorageCommand::cleanupStorage))
                 .then(Commands.literal("reload")
                     .executes(TurboStorageCommand::reloadStorage))
+                .then(Commands.literal("convert")
+                    .executes(TurboStorageCommand::convertToLRF))
                 .then(Commands.literal("info")
                     .executes(TurboStorageCommand::showInfo))
             )
@@ -275,6 +277,28 @@ public class TurboStorageCommand {
             
         } catch (Exception e) {
             source.sendFailure(Component.literal("§cError getting world info: " + e.getMessage()));
+        }
+        
+        return 1;
+    }
+    
+    private static int convertToLRF(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
+        CommandSourceStack source = context.getSource();
+        
+        source.sendSuccess(() -> Component.literal("§e[TurboMC] Starting MCA to LRF conversion..."), false);
+        
+        try {
+            java.nio.file.Path regionDir = java.nio.file.Paths.get("world/region");
+            com.turbomc.storage.converter.RegionConverter converter = new com.turbomc.storage.converter.RegionConverter(true);
+            
+            var result = converter.convertDirectory(regionDir, regionDir, com.turbomc.storage.converter.RegionConverter.FormatType.LRF);
+            
+            source.sendSuccess(() -> Component.literal("§a[TurboMC] Conversion completed: " + result.toString()), false);
+            source.sendSuccess(() -> Component.literal("§e[TurboMC] Check world/region directory for .lrf files"), false);
+            
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("§c[TurboMC] Conversion failed: " + e.getMessage()));
+            e.printStackTrace();
         }
         
         return 1;

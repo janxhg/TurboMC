@@ -9,6 +9,8 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Reads LRF (Linear Region Format) files.
@@ -23,6 +25,16 @@ public class LRFRegionReader implements AutoCloseable {
     private final RandomAccessFile file;
     private final FileChannel channel;
     private final LRFHeader header;
+    
+    // Performance optimizations
+    private final ByteBuffer readBuffer;
+    private final java.util.concurrent.ConcurrentHashMap<Integer, byte[]> chunkCache;
+    private final AtomicLong cacheHits;
+    private final AtomicLong cacheMisses;
+    
+    // Batch read support
+    private final java.util.List<Integer> batchQueue;
+    private final Object batchLock;
     
     /**
      * Open an LRF file for reading.
@@ -47,13 +59,21 @@ public class LRFRegionReader implements AutoCloseable {
             throw new IOException("Invalid LRF file: " + filePath, e);
         }
         
+        // Initialize performance components
+        this.readBuffer = ByteBuffer.allocate(LRFConstants.STREAM_BUFFER_SIZE);
+        this.chunkCache = new java.util.concurrent.ConcurrentHashMap<>();
+        this.cacheHits = new AtomicLong(0);
+        this.cacheMisses = new AtomicLong(0);
+        this.batchQueue = new java.util.ArrayList<>();
+        this.batchLock = new Object();
+        
         System.out.println("[TurboMC] Opened LRF region: " + filePath.getFileName() + 
                          " (" + header.getChunkCount() + " chunks, " + 
                          LRFConstants.getCompressionName(header.getCompressionType()) + ")");
     }
     
     /**
-     * Read a specific chunk.
+     * Read a specific chunk with caching.
      * 
      * @param chunkX Chunk X coordinate
      * @param chunkZ Chunk Z coordinate
@@ -61,6 +81,17 @@ public class LRFRegionReader implements AutoCloseable {
      * @throws IOException if read fails
      */
     public LRFChunkEntry readChunk(int chunkX, int chunkZ) throws IOException {
+        int chunkIndex = LRFConstants.getChunkIndex(chunkX, chunkZ);
+        
+        // Check cache first
+        byte[] cachedData = chunkCache.get(chunkIndex);
+        if (cachedData != null) {
+            cacheHits.incrementAndGet();
+            return createChunkEntry(chunkX, chunkZ, cachedData);
+        }
+        
+        cacheMisses.incrementAndGet();
+        
         if (!header.hasChunk(chunkX, chunkZ)) {
             return null;
         }
@@ -72,18 +103,8 @@ public class LRFRegionReader implements AutoCloseable {
             throw new IOException("Invalid chunk size: " + size + " bytes");
         }
         
-        // Read compressed chunk data
-        ByteBuffer buffer = ByteBuffer.allocate(size);
-        int bytesRead = channel.read(buffer, offset);
-        
-        if (bytesRead != size) {
-            throw new IOException("Failed to read chunk: expected " + size + 
-                                " bytes, got " + bytesRead);
-        }
-        
-        buffer.flip();
-        byte[] compressedData = new byte[size];
-        buffer.get(compressedData);
+        // Read with buffer reuse
+        byte[] compressedData = readWithBuffer(offset, size);
         
         // Decompress if needed
         byte[] data;
@@ -93,18 +114,59 @@ public class LRFRegionReader implements AutoCloseable {
             data = TurboCompressionService.getInstance().decompress(compressedData);
         }
         
+        // Cache the result (with size limit)
+        if (chunkCache.size() < LRFConstants.CACHE_SIZE) {
+            chunkCache.put(chunkIndex, data);
+        }
+        
+        return createChunkEntry(chunkX, chunkZ, data);
+    }
+    
+    /**
+     * Helper method to read with buffer reuse.
+     */
+    private byte[] readWithBuffer(long offset, int size) throws IOException {
+        if (size <= readBuffer.capacity()) {
+            readBuffer.clear();
+            readBuffer.limit(size);
+            int bytesRead = channel.read(readBuffer, offset);
+            if (bytesRead != size) {
+                throw new IOException("Failed to read chunk: expected " + size + 
+                                    " bytes, got " + bytesRead);
+            }
+            readBuffer.flip();
+            byte[] result = new byte[size];
+            readBuffer.get(result);
+            return result;
+        } else {
+            // Fallback for large chunks
+            ByteBuffer buffer = ByteBuffer.allocate(size);
+            int bytesRead = channel.read(buffer, offset);
+            if (bytesRead != size) {
+                throw new IOException("Failed to read chunk: expected " + size + 
+                                    " bytes, got " + bytesRead);
+            }
+            buffer.flip();
+            byte[] result = new byte[size];
+            buffer.get(result);
+            return result;
+        }
+    }
+    
+    /**
+     * Helper method to create chunk entry.
+     */
+    private LRFChunkEntry createChunkEntry(int chunkX, int chunkZ, byte[] data) {
         // Timestamp is stored at the end of each chunk (8 bytes)
         long timestamp = 0;
         if (data.length >= 8) {
             ByteBuffer tsBuffer = ByteBuffer.wrap(data, data.length - 8, 8);
             timestamp = tsBuffer.getLong();
         }
-        
         return new LRFChunkEntry(chunkX, chunkZ, data, timestamp);
     }
-    
     /**
-     * Read all chunks in the region.
+     * Read all chunks in the region with batch optimization.
      * 
      * @return List of all chunk entries
      * @throws IOException if read fails
@@ -124,6 +186,24 @@ public class LRFRegionReader implements AutoCloseable {
         }
         
         return chunks;
+    }
+    
+    /**
+     * Batch read multiple chunks for better performance.
+     */
+    public List<LRFChunkEntry> readBatch(List<int[]> chunkCoords) throws IOException {
+        List<LRFChunkEntry> results = new ArrayList<>();
+        
+        for (int[] coords : chunkCoords) {
+            if (coords.length >= 2) {
+                LRFChunkEntry chunk = readChunk(coords[0], coords[1]);
+                if (chunk != null) {
+                    results.add(chunk);
+                }
+            }
+        }
+        
+        return results;
     }
     
     /**
@@ -165,22 +245,69 @@ public class LRFRegionReader implements AutoCloseable {
         return channel.size();
     }
     
-    @Override
-    public void close() throws IOException {
-        if (channel != null && channel.isOpen()) {
-            channel.close();
+    /**
+     * Get cache statistics.
+     */
+    public CacheStats getCacheStats() {
+        return new CacheStats(cacheHits.get(), cacheMisses.get(), chunkCache.size());
+    }
+    
+    /**
+     * Clear chunk cache.
+     */
+    public void clearCache() {
+        chunkCache.clear();
+        cacheHits.set(0);
+        cacheMisses.set(0);
+    }
+    
+    /**
+     * Cache statistics holder.
+     */
+    public static class CacheStats {
+        public final long hits;
+        public final long misses;
+        public final int size;
+        
+        public CacheStats(long hits, long misses, int size) {
+            this.hits = hits;
+            this.misses = misses;
+            this.size = size;
         }
-        if (file != null) {
-            file.close();
+        
+        public double getHitRate() {
+            long total = hits + misses;
+            return total > 0 ? (double) hits / total * 100 : 0;
+        }
+        
+        @Override
+        public String toString() {
+            return String.format("CacheStats{hits=%d, misses=%d, hitRate=%.1f%%, size=%d}",
+                    hits, misses, getHitRate(), size);
         }
     }
     
+    @Override
+    public void close() throws IOException {
+        try {
+            clearCache();
+        } finally {
+            if (channel != null && channel.isOpen()) {
+                channel.close();
+            }
+            if (file != null) {
+                file.close();
+            }
+        }
+    }
+
     @Override
     public String toString() {
         return "LRFRegionReader{" +
                "file=" + filePath.getFileName() +
                ", chunks=" + header.getChunkCount() +
                ", compression=" + LRFConstants.getCompressionName(header.getCompressionType()) +
+               ", cache=" + getCacheStats() +
                '}';
     }
 }

@@ -1,8 +1,12 @@
 package com.turbomc.storage;
 
+import com.mojang.brigadier.CommandDispatcher;
 import com.turbomc.config.TurboConfig;
+import com.turbomc.compression.TurboCompressionService;
 import com.turbomc.storage.ConversionMode;
 import com.turbomc.commands.TurboCommandRegistry;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.server.MinecraftServer;
 
 import java.nio.file.Path;
 import java.nio.file.Files;
@@ -78,6 +82,10 @@ public final class TurboLRFBootstrap {
             System.out.println("[TurboMC][LRF] Loading configuration...");
             TurboConfig config = TurboConfig.getInstance(serverDirectory.toFile());
 
+            // Initialize compression service
+            System.out.println("[TurboMC][LRF] Initializing compression service...");
+            TurboCompressionService.initialize(config);
+
             // Log storage configuration
             String storageFormat = config.getStorageFormat();
             boolean autoConvert = config.isAutoConvertEnabled();
@@ -118,7 +126,7 @@ public final class TurboLRFBootstrap {
             
             // Register TurboMC commands
             System.out.println("[TurboMC][LRF] Registering TurboMC commands...");
-            // Note: Commands will be registered by the plugin/main class during server startup
+            // Note: Commands will be registered later in SpigotConfig.registerCommands()
             
             // If FULL_LRF mode is enabled, perform migration now
             if (conversionMode == ConversionMode.FULL_LRF && autoConvert) {

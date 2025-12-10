@@ -21,8 +21,8 @@ public final class LRFConstants {
     // Version
     public static final int FORMAT_VERSION = 1;
     
-    // Header structure (256 bytes total)
-    public static final int HEADER_SIZE = 256;
+    // Header structure (8KB total for safety)
+    public static final int HEADER_SIZE = 8192;
     public static final int VERSION_OFFSET = MAGIC_LENGTH;        // After magic bytes
     public static final int VERSION_SIZE = 4;
     public static final int CHUNK_COUNT_OFFSET = VERSION_OFFSET + VERSION_SIZE;
@@ -30,7 +30,7 @@ public final class LRFConstants {
     public static final int COMPRESSION_TYPE_OFFSET = CHUNK_COUNT_OFFSET + CHUNK_COUNT_SIZE;
     public static final int COMPRESSION_TYPE_SIZE = 4;
     public static final int OFFSETS_TABLE_OFFSET = COMPRESSION_TYPE_OFFSET + COMPRESSION_TYPE_SIZE;
-    public static final int OFFSETS_TABLE_SIZE = HEADER_SIZE - OFFSETS_TABLE_OFFSET;
+    public static final int OFFSETS_TABLE_SIZE = LRFConstants.CHUNKS_PER_REGION * 4; // 4096 bytes for 1024 chunks
     
     // Region dimensions (32x32 chunks like vanilla)
     public static final int REGION_SIZE = 32;
@@ -39,6 +39,11 @@ public final class LRFConstants {
     // Chunk metadata
     public static final int MAX_CHUNK_SIZE = 1024 * 1024; // 1MB max per chunk
     public static final int CHUNK_HEADER_SIZE = 8; // 4 bytes offset + 4 bytes size
+    
+    // Performance optimizations
+    public static final int BATCH_SIZE = 32; // Chunks per batch operation
+    public static final int CACHE_SIZE = 64; // Header cache entries
+    public static final int STREAM_BUFFER_SIZE = 8192; // 8KB streaming buffer
     
     // Compression algorithms
     public static final int COMPRESSION_NONE = 0;
@@ -61,15 +66,21 @@ public final class LRFConstants {
     
     /**
      * Get chunk index in region from chunk coordinates.
+     * Optimized with bit masking.
      * 
      * @param chunkX Chunk X coordinate
      * @param chunkZ Chunk Z coordinate
      * @return Index in region (0-1023)
      */
     public static int getChunkIndex(int chunkX, int chunkZ) {
-        int localX = chunkX & CHUNK_X_MASK;
-        int localZ = chunkZ & CHUNK_Z_MASK;
-        return localX + localZ * REGION_SIZE;
+        return (chunkX & CHUNK_X_MASK) | ((chunkZ & CHUNK_Z_MASK) << 5);
+    }
+    
+    /**
+     * Get chunk coordinates from index - inverse operation.
+     */
+    public static int[] getChunkCoords(int index) {
+        return new int[]{index & CHUNK_X_MASK, (index >>> 5) & CHUNK_Z_MASK};
     }
     
     /**

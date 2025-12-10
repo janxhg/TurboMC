@@ -32,6 +32,8 @@ public class AnvilRegionReader implements AutoCloseable {
     // Compression types
     private static final byte COMPRESSION_GZIP = 1;
     private static final byte COMPRESSION_ZLIB = 2;
+    private static final byte COMPRESSION_NONE = 3;  // Uncompressed
+    private static final byte COMPRESSION_LZ4 = 4;    // LZ4 compression
     
     private final Path filePath;
     private final RandomAccessFile file;
@@ -143,17 +145,21 @@ public class AnvilRegionReader implements AutoCloseable {
      */
     private byte[] decompressChunk(byte[] compressedData, byte compressionType) throws IOException {
         try {
-            ByteArrayInputStream bais = new ByteArrayInputStream(compressedData);
-            
             if (compressionType == COMPRESSION_GZIP) {
-                return readAllBytes(new GZIPInputStream(bais));
+                return readAllBytes(new GZIPInputStream(new ByteArrayInputStream(compressedData)));
             } else if (compressionType == COMPRESSION_ZLIB) {
-                return readAllBytes(new InflaterInputStream(bais));
+                return readAllBytes(new InflaterInputStream(new ByteArrayInputStream(compressedData)));
+            } else if (compressionType == COMPRESSION_NONE) {
+                // Uncompressed data
+                return compressedData;
+            } else if (compressionType == COMPRESSION_LZ4) {
+                // LZ4 compression - for now, skip these chunks
+                System.err.println("[TurboMC] Warning: LZ4 compression not yet supported, skipping chunk");
+                throw new IOException("LZ4 compression not supported");
             } else {
                 throw new IOException("Unknown compression type: " + compressionType);
             }
         } catch (Exception e) {
-            // Log the error but don't fail the entire conversion
             System.err.println("[TurboMC] Warning: Failed to decompress chunk, skipping: " + e.getMessage());
             throw new IOException("Failed to decompress chunk", e);
         }

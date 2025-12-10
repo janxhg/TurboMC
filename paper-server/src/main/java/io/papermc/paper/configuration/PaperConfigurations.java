@@ -201,7 +201,7 @@ public class PaperConfigurations extends Configurations<GlobalConfiguration, Wor
     }
 
     private static ObjectMapper.Factory.Builder defaultGlobalFactoryBuilder(ObjectMapper.Factory.Builder builder) {
-        return builder.addDiscoverer(InnerClassFieldDiscoverer.globalConfig(defaultFieldProcessors()));
+        return builder.addDiscoverer(InnerClassFieldDiscoverer.globalConfig((List) defaultFieldProcessors()));
     }
 
     @Override
@@ -237,7 +237,7 @@ public class PaperConfigurations extends Configurations<GlobalConfiguration, Wor
         return super.createWorldObjectMapperFactoryBuilder(contextMap)
             .addNodeResolver(new RequiresSpigotInitialization.Factory(contextMap.require(SPIGOT_WORLD_CONFIG_CONTEXT_KEY).get()))
             .addNodeResolver(new NestedSetting.Factory())
-            .addDiscoverer(InnerClassFieldDiscoverer.worldConfig(createWorldConfigInstance(contextMap), defaultFieldProcessors()));
+            .addDiscoverer(InnerClassFieldDiscoverer.worldConfig(createWorldConfigInstance(contextMap), (List) defaultFieldProcessors()));
     }
 
     private static WorldConfiguration createWorldConfigInstance(ContextMap contextMap) {
