@@ -18,21 +18,30 @@ import net.minecraft.world.level.chunk.storage.RegionFileStorage;
 import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
 
 /**
- * TurboMC-enhanced RegionFileStorage that integrates with the advanced storage system.
+ * TurboMC-enhanced region storage wrapper that integrates with the advanced storage system.
  * This wrapper provides seamless integration between Paper's chunk storage and TurboMC's
  * optimized batch loading, memory-mapped I/O, and integrity validation.
  * 
  * @author TurboMC
  * @version 1.0.0
  */
-public class TurboRegionFileStorage extends RegionFileStorage {
+public class TurboRegionFileStorage {
     
+    private final RegionFileStorage delegate;
     private final TurboStorageManager storageManager;
     private final Path regionFolder;
     private final boolean useTurboFeatures;
     
     public TurboRegionFileStorage(RegionStorageInfo info, Path folder, boolean sync) {
-        super(info, folder, sync);
+        // Use reflection to access protected constructor
+        try {
+            java.lang.reflect.Constructor<RegionFileStorage> constructor = RegionFileStorage.class.getDeclaredConstructor(
+                RegionStorageInfo.class, Path.class, boolean.class);
+            constructor.setAccessible(true);
+            this.delegate = constructor.newInstance(info, folder, sync);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create RegionFileStorage delegate", e);
+        }
         this.regionFolder = folder;
         this.storageManager = TurboStorageManager.getInstance();
         
@@ -47,18 +56,17 @@ public class TurboRegionFileStorage extends RegionFileStorage {
     /**
      * Read a chunk with TurboMC optimizations.
      */
-    @Override
     @Nullable
     public CompoundTag read(ChunkPos pos) throws IOException {
         if (!useTurboFeatures) {
-            return super.read(pos);
+            return delegate.read(pos);
         }
         
         try {
             // Try to get region file path for this chunk
             Path regionPath = getRegionPath(pos);
             if (regionPath == null) {
-                return super.read(pos);
+                return delegate.read(pos);
             }
             
             // Check if this is an LRF file (TurboMC format)
@@ -71,17 +79,16 @@ public class TurboRegionFileStorage extends RegionFileStorage {
             
         } catch (Exception e) {
             System.err.println("[TurboMC][RegionStorage] Error in optimized read, falling back to vanilla: " + e.getMessage());
-            return super.read(pos);
+            return delegate.read(pos);
         }
     }
     
     /**
      * Write a chunk with TurboMC optimizations.
      */
-    @Override
     public void write(ChunkPos pos, CompoundTag nbt) throws IOException {
         if (!useTurboFeatures) {
-            super.write(pos, nbt);
+            delegate.write(pos, nbt);
             return;
         }
         
@@ -89,7 +96,7 @@ public class TurboRegionFileStorage extends RegionFileStorage {
             // Try to get region file path for this chunk
             Path regionPath = getRegionPath(pos);
             if (regionPath == null) {
-                super.write(pos, nbt);
+                delegate.write(pos, nbt);
                 return;
             }
             
@@ -104,7 +111,7 @@ public class TurboRegionFileStorage extends RegionFileStorage {
             
         } catch (Exception e) {
             System.err.println("[TurboMC][RegionStorage] Error in optimized write, falling back to vanilla: " + e.getMessage());
-            super.write(pos, nbt);
+            delegate.write(pos, nbt);
         }
     }
     
@@ -177,7 +184,7 @@ public class TurboRegionFileStorage extends RegionFileStorage {
     private CompoundTag readFromMCAOptimized(ChunkPos pos) throws IOException {
         // For now, use vanilla implementation
         // TODO: Implement MCA optimization with batch loading
-        return super.read(pos);
+        return delegate.read(pos);
     }
     
     /**
@@ -186,7 +193,7 @@ public class TurboRegionFileStorage extends RegionFileStorage {
     private void writeToMCAOptimized(ChunkPos pos, CompoundTag nbt) throws IOException {
         // For now, use vanilla implementation  
         // TODO: Implement MCA optimization with batch saving
-        super.write(pos, nbt);
+        delegate.write(pos, nbt);
     }
     
     /**
@@ -262,7 +269,6 @@ public class TurboRegionFileStorage extends RegionFileStorage {
      * Close all TurboMC resources for this world.
      * Call this when the world is unloaded.
      */
-    @Override
     public void close() throws IOException {
         try {
             // Close all TurboMC storage components for this world
@@ -279,7 +285,7 @@ public class TurboRegionFileStorage extends RegionFileStorage {
             }
         } finally {
             // Always close the parent storage
-            super.close();
+            delegate.close();
         }
     }
     
