@@ -143,6 +143,13 @@ public final class TurboStorageHooks {
         }
         
         TurboConfig config = TurboConfig.getInstance();
+        
+        // Always enable in FULL_LRF mode
+        String conversionMode = config.getString("storage.conversion-mode", "manual");
+        if (ConversionMode.FULL_LRF.equals(ConversionMode.fromString(conversionMode))) {
+            return true;
+        }
+        
         return config.getBoolean("storage.batch.enabled", true) ||
                config.getBoolean("storage.mmap.enabled", true) ||
                config.getBoolean("storage.integrity.enabled", true);

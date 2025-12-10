@@ -17,6 +17,15 @@
 - **Command system**: `/turbo storage convert` command functional
 - **Statistics tracking**: Detailed conversion metrics and progress reporting
 - **Chunk handling**: Proper support for different compression types (GZIP, ZLIB, None, LZ4)
+- **Full LRF mode**: Native LRF chunk creation without MCA conversion (prevents bugs and improves performance)
+
+## Mode Differences
+- **Manual mode**: Converts existing MCA files to LRF format
+- **Full LRF mode**: Creates chunks directly in LRF format from scratch
+  - No MCA/LRF coexistence allowed (prevents loading bugs)
+  - Faster chunk creation and loading
+  - Eliminates conversion overhead
+  - Recommended for new worlds
 
 ## Performance Results
 - Successfully converted 1675 chunks in 4.61 seconds

@@ -5,6 +5,7 @@ import com.turbomc.compression.TurboCompressionService;
 import com.turbomc.storage.LRFConstants;
 import com.turbomc.storage.LRFChunkEntry;
 import com.turbomc.storage.TurboStorageManager;
+import com.turbomc.storage.ConversionMode;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
@@ -291,6 +292,13 @@ public class TurboRegionFileStorage {
         }
         
         TurboConfig config = TurboConfig.getInstance();
+        String conversionMode = config.getString("storage.conversion-mode", "manual");
+        
+        // In FULL_LRF mode, always create LRF files directly (no MCA conversion)
+        if (ConversionMode.FULL_LRF.equals(ConversionMode.fromString(conversionMode))) {
+            return true;
+        }
+        
         String storageFormat = config.getString("storage.format", "auto");
         
         if (storageFormat.equals("lrf")) {
@@ -312,6 +320,14 @@ public class TurboRegionFileStorage {
         }
         
         TurboConfig config = TurboConfig.getInstance();
+        
+        // Always enable in FULL_LRF mode
+        String conversionMode = config.getString("storage.conversion-mode", "manual");
+        if (ConversionMode.FULL_LRF.equals(ConversionMode.fromString(conversionMode))) {
+            return true;
+        }
+        
+        // Otherwise check for other Turbo features
         return config.getBoolean("storage.batch.enabled", true) ||
                config.getBoolean("storage.mmap.enabled", true) ||
                config.getBoolean("storage.integrity.enabled", true);
