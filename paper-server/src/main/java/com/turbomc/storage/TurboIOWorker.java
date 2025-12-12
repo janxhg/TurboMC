@@ -91,7 +91,7 @@ public class TurboIOWorker implements ChunkScanAccess, AutoCloseable {
         long l = ChunkPos.asLong(regionX, regionZ);
         return this.regionCacheForBlender.computeIfAbsent(l, (m) -> {
             BitSet bitSet = new BitSet(1024);
-            this.run(Priority.LOW, () -> {
+            this.run(Priority.BACKGROUND, () -> {
                 try {
                     this.storage.scanRegion(regionX, regionZ, (chunkX, chunkZ) -> {
                         bitSet.set((int) ChunkPos.asLong(chunkX, chunkZ));
@@ -107,36 +107,57 @@ public class TurboIOWorker implements ChunkScanAccess, AutoCloseable {
         });
     }
 
-    public CompletableFuture<Void> store(ChunkPos chunkPos, CompoundTag nbt) {
-        PendingStore pendingStore = new PendingStore(nbt);
-        return this.run(Priority.HIGH, () -> {
-            PendingStore pendingStore2 = this.pendingWrites.put(chunkPos, pendingStore);
-            if (pendingStore2 != null) {
-                pendingStore2.promise.complete(Unit.INSTANCE);
-            }
-            return null;
-        }).thenCompose((object) -> pendingStore.promise.thenApply(unit -> null));
+    public CompletableFuture<Void> store(ChunkPos chunkPos, @Nullable CompoundTag chunkData) {
+        return this.store(chunkPos, () -> chunkData);
     }
 
-    public CompletableFuture<Optional<CompoundTag>> load(ChunkPos chunkPos) {
-        return this.run(Priority.NORMAL, () -> {
+    public CompletableFuture<Void> store(ChunkPos chunkPos, Supplier<CompoundTag> dataSupplier) {
+        PendingStore pendingStore = new PendingStore(dataSupplier.get());
+        PendingStore pendingStore2 = this.pendingWrites.put(chunkPos, pendingStore);
+        if (pendingStore2 != null) {
+            try {
+                this.writeData(chunkPos, pendingStore2);
+            } catch (Exception var4) {
+                LOGGER.error("Failed to store chunk {}", chunkPos, var4);
+                pendingStore2.result.completeExceptionally(var4);
+            }
+        }
+
+        return this.submitTask(() -> {
+            try {
+                this.writeData(chunkPos, pendingStore);
+            } catch (Exception var4) {
+                LOGGER.error("Failed to store chunk {}", chunkPos, var4);
+                pendingStore.result.completeExceptionally(var4);
+            }
+            return null;
+        }).thenCompose((object) -> pendingStore.result).thenApply(unit -> null);
+    }
+
+    private void writeData(ChunkPos chunkPos, PendingStore pendingStore) throws IOException {
+        CompoundTag compoundTag = pendingStore.copyData();
+        this.storage.write(chunkPos, compoundTag);
+        pendingStore.result.complete(null);
+    }
+
+    public CompletableFuture<CompoundTag> load(ChunkPos chunkPos) {
+        return this.run(Priority.FOREGROUND, () -> {
             PendingStore pendingStore = this.pendingWrites.get(chunkPos);
             if (pendingStore != null) {
-                return Optional.of(pendingStore.data);
+                return pendingStore.copyData();
             } else {
                 try {
-                    CompoundTag compoundTag = this.storage.read(chunkPos);
-                    return compoundTag != null ? Optional.of(compoundTag) : Optional.empty();
+                    return this.storage.read(chunkPos);
                 } catch (Exception var4) {
                     LOGGER.error("Failed to read chunk {}", chunkPos, var4);
-                    return Optional.empty();
+                    return null;
                 }
             }
         });
     }
 
     public CompletableFuture<Void> synchronize(boolean fullSync) {
-        return this.run(fullSync ? Priority.HIGH : Priority.NORMAL, () -> {
+        return this.run(fullSync ? Priority.FOREGROUND : Priority.BACKGROUND, () -> {
             try {
                 this.storage.flush();
             } catch (IOException e) {
@@ -147,26 +168,34 @@ public class TurboIOWorker implements ChunkScanAccess, AutoCloseable {
     }
 
     public CompletableFuture<Void> closeStore() throws IOException {
-        return this.run(Priority.HIGH, () -> {
-            this.shutdownRequested.set(true);
-            try {
-                this.storage.close();
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to close storage", e);
+        return this.run(Priority.SHUTDOWN, () -> {
+            if (this.shutdownRequested.compareAndSet(false, true)) {
+                this.waitForShutdown();
+                
+                try {
+                    this.consecutiveExecutor.close();
+                } catch (Exception e) {
+                    LOGGER.error("Failed to close consecutive executor", e);
+                }
+
+                try {
+                    this.storage.close();
+                } catch (Exception var2) {
+                    LOGGER.error("Failed to close storage", (Throwable)var2);
+                }
             }
             return null;
         });
     }
-    
-    @Override
-    public void close() throws IOException {
-        this.shutdownRequested.set(true);
-        this.consecutiveExecutor.close();
-        try {
-            this.storage.close();
-        } catch (IOException e) {
-            throw e;
-        }
+
+    private void waitForShutdown() {
+        this.consecutiveExecutor
+            .scheduleWithResult(Priority.SHUTDOWN.ordinal(), completableFuture -> completableFuture.complete(Unit.INSTANCE))
+            .join();
+    }
+
+    public RegionStorageInfo storageInfo() {
+        return this.storage.info();
     }
 
     private <T> CompletableFuture<T> run(Priority priority, Supplier<T> task) {
@@ -174,28 +203,33 @@ public class TurboIOWorker implements ChunkScanAccess, AutoCloseable {
             return CompletableFuture.completedFuture(null);
         } else {
             CompletableFuture<T> completableFuture = new CompletableFuture<>();
-            this.consecutiveExecutor.schedule(new StrictQueue.RunnableWithPriority(priority.ordinal(), () -> {
+            this.consecutiveExecutor.scheduleWithResult(priority.ordinal(), (future) -> {
                 try {
                     completableFuture.complete(task.get());
-                } catch (Throwable var3) {
+                } catch (Exception var3) {
                     completableFuture.completeExceptionally(var3);
                 }
-            }));
+            });
             return completableFuture;
         }
     }
 
+    private <T> CompletableFuture<T> submitTask(Supplier<T> task) {
+        return this.run(Priority.FOREGROUND, task);
+    }
+
     public CompletableFuture<Void> scanChunk(ChunkPos chunkPos, StreamTagVisitor streamTagVisitor) {
-        return this.run(Priority.NORMAL, () -> {
+        return this.run(Priority.BACKGROUND, () -> {
             try {
                 CompoundTag compoundTag = this.storage.read(chunkPos);
                 if (compoundTag != null) {
                     compoundTag.accept(streamTagVisitor);
                 }
-            } catch (IOException e) {
-                throw new RuntimeException(e);
+                return null;
+            } catch (Exception var4) {
+                LOGGER.error("Failed to scan chunk {}", chunkPos, var4);
+                return null;
             }
-            return null;
         });
     }
 
@@ -226,22 +260,36 @@ public class TurboIOWorker implements ChunkScanAccess, AutoCloseable {
         this.storage.flush();
     }
 
+    @Override
+    public void close() throws IOException {
+        this.closeStore().join();
+    }
+
     static enum Priority {
         LOW,
         NORMAL,
-        HIGH;
+        HIGH,
+        BACKGROUND,
+        FOREGROUND,
+        SHUTDOWN;
 
         private Priority() {
         }
     }
 
     static class PendingStore {
-        final CompoundTag data;
-        final CompletableFuture<Unit> promise;
+        @Nullable
+        CompoundTag data;
+        final CompletableFuture<Void> result = new CompletableFuture<>();
 
-        PendingStore(CompoundTag nbt) {
-            this.data = nbt;
-            this.promise = new CompletableFuture<>();
+        public PendingStore(@Nullable CompoundTag data) {
+            this.data = data;
+        }
+
+        @Nullable
+        CompoundTag copyData() {
+            CompoundTag compoundTag = this.data;
+            return compoundTag == null ? null : compoundTag.copy();
         }
     }
 }

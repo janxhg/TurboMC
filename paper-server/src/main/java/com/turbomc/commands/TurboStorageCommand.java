@@ -69,34 +69,48 @@ public class TurboStorageCommand {
         CommandSourceStack source = context.getSource();
         
         try {
-            TurboStorageManager.StorageManagerStats stats = TurboStorageHooks.getGlobalStats();
+            // Get comprehensive stats from storage manager
+            TurboStorageManager.StorageManagerStats stats = TurboStorageManager.getInstance().getStats();
             
             source.sendSuccess(() -> Component.literal("§6=== TurboMC Storage Statistics ==="), false);
+            
+            // System Status
+            source.sendSuccess(() -> Component.literal("§eSystem Status:"), false);
+            source.sendSuccess(() -> Component.literal("  §7Hooks Installed: " + (TurboStorageHooks.areHooksInstalled() ? "§aYes" : "§cNo")), false);
+            source.sendSuccess(() -> Component.literal("  §7Active Wrappers: §a" + TurboStorageHooks.getActiveWrapperCount()), false);
+            
+            // Component Status
             source.sendSuccess(() -> Component.literal("§eActive Components:"), false);
             source.sendSuccess(() -> Component.literal("  §7Batch Loaders: §a" + stats.getBatchLoaders()), false);
             source.sendSuccess(() -> Component.literal("  §7Batch Savers: §a" + stats.getBatchSavers()), false);
             source.sendSuccess(() -> Component.literal("  §7MMap Engines: §a" + stats.getMmapEngines()), false);
             source.sendSuccess(() -> Component.literal("  §7Integrity Validators: §a" + stats.getIntegrityValidators()), false);
             
+            // Performance Metrics
             source.sendSuccess(() -> Component.literal("§ePerformance Metrics:"), false);
             source.sendSuccess(() -> Component.literal("  §7Chunks Loaded: §a" + stats.getTotalLoaded()), false);
             source.sendSuccess(() -> Component.literal("  §7Chunks Decompressed: §a" + stats.getTotalDecompressed()), false);
-            source.sendSuccess(() -> Component.literal("  §7Corrupted Chunks: §c" + stats.getTotalCorrupted() + " §7(" + String.format("%.2f%%", stats.getCorruptionRate()) + "%"), false);
+            source.sendSuccess(() -> Component.literal("  §7Cache Hit Rate: §a" + String.format("%.1f%%", stats.getCacheHitRate())), false);
             source.sendSuccess(() -> Component.literal("  §7Avg Load Time: §a" + String.format("%.2fms", stats.getAvgLoadTime())), false);
             
-            source.sendSuccess(() -> Component.literal("§eIntegrity Validation:"), false);
-            source.sendSuccess(() -> Component.literal("  §7Chunks Validated: §a" + stats.getTotalValidated()), false);
-            source.sendSuccess(() -> Component.literal("  §7Corrupted Chunks: §c" + stats.getTotalCorrupted()), false);
-            source.sendSuccess(() -> Component.literal("  §7Chunks Repaired: §a" + stats.getTotalRepaired()), false);
-           source.sendSuccess(() -> Component.literal("§eMemory Usage:"), false);
-            source.sendSuccess(() -> Component.literal("  §7MMap Memory: §a" + String.format("%.1fMB", stats.getMmapMemoryUsage() / 1024.0 / 1024.0)), false);
-            source.sendSuccess(() -> Component.literal("  §7Checksum Storage: §a" + String.format("%.1fMB", stats.getTotalChecksumStorage() / 1024.0 / 1024.0)), false);
+            // Integrity Metrics
+            if (stats.isIntegrityEnabled()) {
+                source.sendSuccess(() -> Component.literal("§eIntegrity Validation:"), false);
+                source.sendSuccess(() -> Component.literal("  §7Chunks Validated: §a" + stats.getTotalValidated()), false);
+                source.sendSuccess(() -> Component.literal("  §7Corruption Rate: §c" + String.format("%.2f%%", stats.getCorruptionRate())), false);
+                source.sendSuccess(() -> Component.literal("  §7Chunks Repaired: §a" + stats.getTotalRepaired()), false);
+                source.sendSuccess(() -> Component.literal("  §7Checksum Storage: §a" + String.format("%.1fMB", stats.getTotalChecksumStorage() / 1024.0 / 1024.0)), false);
+            }
             
-            source.sendSuccess(() -> Component.literal("§eFeature Status:"), false);
-            source.sendSuccess(() -> Component.literal("  §7Batch Operations: " + (stats.isBatchEnabled() ? "§aENABLED" : "§cDISABLED")), false);
-            source.sendSuccess(() -> Component.literal("  §7Memory-Mapped I/O: " + (stats.isMmapEnabled() ? "§aENABLED" : "§cDISABLED")), false);
-            source.sendSuccess(() -> Component.literal("  §7Integrity Validation: " + (stats.isIntegrityEnabled() ? "§aENABLED" : "§cDISABLED")), false);
-            source.sendSuccess(() -> Component.literal("§6Active Wrappers: §a" + TurboStorageHooks.getActiveWrapperCount()), false);
+            // Memory Usage
+            source.sendSuccess(() -> Component.literal("§eMemory Usage:"), false);
+            source.sendSuccess(() -> Component.literal("  §7MMap Memory: §a" + String.format("%.1fMB", stats.getMmapMemoryUsage() / 1024.0 / 1024.0)), false);
+            
+            // Feature Status
+            source.sendSuccess(() -> Component.literal("§eEnabled Features:"), false);
+            source.sendSuccess(() -> Component.literal("  §7Batch Operations: " + (stats.isBatchEnabled() ? "§aEnabled" : "§cDisabled")), false);
+            source.sendSuccess(() -> Component.literal("  §7Memory-Mapped I/O: " + (stats.isMmapEnabled() ? "§aEnabled" : "§cDisabled")), false);
+            source.sendSuccess(() -> Component.literal("  §7Integrity Validation: " + (stats.isIntegrityEnabled() ? "§aEnabled" : "§cDisabled")), false);
             
         } catch (Exception e) {
             source.sendFailure(Component.literal("§cError getting storage stats: " + e.getMessage()));
@@ -201,7 +215,7 @@ public class TurboStorageCommand {
             TurboStorageHooks.cleanupAll();
             
             source.sendSuccess(() -> Component.literal("§aCleanup completed! Removed " + wrappersBefore + " wrappers"), false);
-            source.sendSuccess(() -> Component.literal("§eFinal stats: " + TurboStorageHooks.getGlobalStats()), false);
+            source.sendSuccess(() -> Component.literal("§eFinal stats: " + TurboStorageManager.getInstance().getStats().toString()), false);
             
         } catch (Exception e) {
             source.sendFailure(Component.literal("§cError during cleanup: " + e.getMessage()));
@@ -224,7 +238,7 @@ public class TurboStorageCommand {
             com.turbomc.storage.TurboLRFBootstrap.initialize();
             
             source.sendSuccess(() -> Component.literal("§aTurboMC storage reloaded successfully!"), false);
-            source.sendSuccess(() -> Component.literal("§eNew stats: " + TurboStorageHooks.getGlobalStats()), false);
+            source.sendSuccess(() -> Component.literal("§eNew stats: " + TurboStorageManager.getInstance().getStats().toString()), false);
             
         } catch (Exception e) {
             source.sendFailure(Component.literal("§cError reloading storage: " + e.getMessage()));

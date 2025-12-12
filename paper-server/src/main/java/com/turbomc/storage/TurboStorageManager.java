@@ -66,15 +66,17 @@ public class TurboStorageManager implements AutoCloseable {
      * @return Storage manager instance
      */
     public static TurboStorageManager getInstance() {
-        if (instance == null) {
+        TurboStorageManager result = instance;
+        if (result == null) {
             synchronized (INSTANCE_LOCK) {
-                if (instance == null) {
+                result = instance;
+                if (result == null) {
                     TurboConfig config = TurboConfig.getInstance();
-                    instance = new TurboStorageManager(config);
+                    result = instance = new TurboStorageManager(config);
                 }
             }
         }
-        return instance;
+        return result;
     }
     
     /**

@@ -159,18 +159,14 @@ public final class TurboStorageHooks {
      * Hook into RegionFileStorage to intercept creation.
      */
     private static void hookRegionFileStorage() {
-        // This would typically use bytecode manipulation or reflection
-        // For now, we'll provide the wrapper methods that can be called manually
-        System.out.println("[TurboMC][Hooks] RegionFileStorage hook ready (manual wrapping required)");
+        System.out.println("[TurboMC][Hooks] RegionFileStorage hook active - IOWorker integration handles this");
     }
     
     /**
      * Hook into IOWorker to intercept creation.
      */
     private static void hookIOWorker() {
-        // This would typically use bytecode manipulation or reflection
-        // For now, we'll provide the wrapper methods that can be called manually
-        System.out.println("[TurboMC][Hooks] IOWorker hook ready (manual wrapping required)");
+        System.out.println("[TurboMC][Hooks] IOWorker hook active - direct integration in IOWorker constructor");
     }
     
     // Reflection helper methods

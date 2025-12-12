@@ -36,7 +36,7 @@ auto-convert = true
 - Production servers that can't afford long startup times
 - Servers with existing large worlds
 
----
+
 
 ### 2. BACKGROUND
 
@@ -69,7 +69,6 @@ auto-convert = true
 - Servers with variable player loads
 - Environments that want balanced performance
 
----
 
 ### 3. FULL_LRF
 
@@ -103,7 +102,7 @@ auto-convert = true
 - Maximum performance requirements
 - Servers with downtime for maintenance
 
----
+
 
 ### 4. MANUAL
 
@@ -134,7 +133,7 @@ auto-convert = false
 - Servers with specific maintenance windows
 - Testing and development environments
 
----
+
 
 ## Usage Examples
 
@@ -197,7 +196,7 @@ new RegionConverter(true)
     .convertRegionDirectory(worldRegionDir, worldRegionDir, StorageFormat.LRF);
 ```
 
----
+
 
 ## Performance Comparison
 
@@ -208,7 +207,8 @@ new RegionConverter(true)
 | FULL_LRF | Slow | Consistent (optimal) | Immediate increase | Low |
 | MANUAL | Fastest | Depends on conversion timing | Controlled | High |
 
----
+
+
 
 ## Migration Between Modes
 
@@ -228,7 +228,7 @@ new RegionConverter(true)
 3. Restart server
 4. Use manual conversion as needed
 
----
+
 
 ## Troubleshooting
 
@@ -252,7 +252,7 @@ new RegionConverter(true)
 - Check file permissions
 - Ensure world directory is accessible
 
----
+
 
 ## Technical Details
 
@@ -295,6 +295,6 @@ new LRFToMCAConverter(true)
     .convertDirectory(Paths.get("world/region"), Paths.get("world/region"), true);
 ```
 
----
+
 
 **TurboMC v1.3.0** | LRF Conversion Modes Implemented

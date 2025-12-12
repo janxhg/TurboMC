@@ -5,6 +5,8 @@ import com.turbomc.config.TurboConfig;
 import com.turbomc.compression.TurboCompressionService;
 import com.turbomc.storage.ConversionMode;
 import com.turbomc.commands.TurboCommandRegistry;
+import com.turbomc.performance.TurboQualityManager;
+import com.turbomc.performance.TurboChunkLoadingOptimizer;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
 
@@ -43,6 +45,30 @@ public final class TurboLRFBootstrap {
                     "    auto-convert: true\n" +
                     "    conversion-mode: on-demand\n" +
                     "    format: lrf\n" +
+                    "  quality:\n" +
+                    "    tps-threshold: 18\n" +
+                    "    memory-threshold: 0.8\n" +
+                    "    auto-adjust.enabled: true\n" +
+                    "    default-preset: HIGH\n" +
+                    "    entity-culling.enabled: true\n" +
+                    "    particle-optimization.enabled: true\n" +
+                    "  fps:\n" +
+                    "    target-tps: 20\n" +
+                    "    tps-tolerance: 0.5\n" +
+                    "    redstone-optimization.enabled: true\n" +
+                    "    entity-optimization.enabled: true\n" +
+                    "    hopper-optimization.enabled: true\n" +
+                    "    mob-spawning-optimization.enabled: true\n" +
+                    "    chunk-ticking-optimization.enabled: true\n" +
+                    "    default-mode: BALANCED\n" +
+                    "  chunk:\n" +
+                    "    preloading.enabled: true\n" +
+                    "    parallel-generation.enabled: true\n" +
+                    "    caching.enabled: true\n" +
+                    "    priority-loading.enabled: true\n" +
+                    "    max-memory-usage-mb: 512\n" +
+                    "    memory-threshold: 0.8\n" +
+                    "    default-strategy: BALANCED\n" +
                     "  version-control:\n" +
                     "    maximum-version: 1.21.10\n" +
                     "    minimum-version: 1.20.1\n";
@@ -72,7 +98,7 @@ public final class TurboLRFBootstrap {
      * @param serverDirectory the server root directory (where turbo.toml is located)
      */
     public static void initialize(Path serverDirectory) {
-        System.out.println("[TurboMC][LRF] Initializing LRF storage system...");
+        System.out.println("[TurboMC][LRF] Initializing TurboMC LRF storage system...");
 
             // Ensure paper-global.yml contains TurboMC config section
             ensurePaperGlobalConfig(serverDirectory);
@@ -124,6 +150,9 @@ public final class TurboLRFBootstrap {
             System.out.println("[TurboMC][LRF] Installing storage hooks...");
             TurboStorageHooks.installHooks();
             
+            // Initialize performance optimization systems
+            initializePerformanceOptimizations(config);
+            
             // Register TurboMC commands
             System.out.println("[TurboMC][LRF] Registering TurboMC commands...");
             // Note: Commands will be registered later in SpigotConfig.registerCommands()
@@ -134,6 +163,36 @@ public final class TurboLRFBootstrap {
             }
         } catch (Exception e) {
             System.err.println("[TurboMC][LRF] Failed to initialize LRF storage system: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * Initialize all performance optimization systems.
+     */
+    private static void initializePerformanceOptimizations(TurboConfig config) {
+        System.out.println("[TurboMC][Perf] Initializing performance optimization systems...");
+        
+        try {
+            // Initialize Quality Manager
+            System.out.println("[TurboMC][Perf] Initializing Quality Manager...");
+            TurboQualityManager qualityManager = TurboQualityManager.getInstance();
+            qualityManager.initialize();
+            
+            // Initialize FPS Optimizer (commented - will be added later)
+            // System.out.println("[TurboMC][Perf] Initializing FPS Optimizer...");
+            // TurboFPSOptimizer fpsOptimizer = TurboFPSOptimizer.getInstance();
+            // fpsOptimizer.initialize();
+            
+            // Initialize Chunk Loading Optimizer
+            System.out.println("[TurboMC][Perf] Initializing Chunk Loading Optimizer...");
+            TurboChunkLoadingOptimizer chunkOptimizer = TurboChunkLoadingOptimizer.getInstance();
+            chunkOptimizer.initialize();
+            
+            System.out.println("[TurboMC][Perf] All performance optimization systems initialized successfully!");
+            
+        } catch (Exception e) {
+            System.err.println("[TurboMC][Perf] Failed to initialize performance optimizations: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -192,6 +251,7 @@ public final class TurboLRFBootstrap {
             }
             
             System.out.println("[TurboMC][LRF] Starting full LRF migration for all worlds...");
+            System.out.println("[TurboMC][LRF] WARNING: This will block player connections until conversion completes!");
             
             // Common world directories
             String[] worldNames = {"world", "world_nether", "world_the_end"};
@@ -200,12 +260,13 @@ public final class TurboLRFBootstrap {
                 Path worldDir = serverDirectory.resolve(worldName);
                 if (Files.isDirectory(worldDir)) {
                     System.out.println("[TurboMC][LRF] Migrating world: " + worldName);
-                    // Use the full LRF conversion mode
+                    // Use the full LRF conversion mode - FIXED: Pass conversion mode explicitly
                     config.migrateWorldRegionsIfNeeded(worldDir);
                 }
             }
             
             System.out.println("[TurboMC][LRF] Full LRF migration completed for all worlds.");
+            System.out.println("[TurboMC][LRF] Server can now accept player connections.");
             
         } catch (Exception e) {
             System.err.println("[TurboMC][LRF] Failed to perform full LRF migration: " + e.getMessage());

@@ -21,7 +21,8 @@ import org.yaml.snakeyaml.Yaml;
  * Loads settings from turbo.toml configuration file.
  */
 public class TurboConfig {
-    private static TurboConfig instance;
+    private static volatile TurboConfig instance;
+    private static final Object INSTANCE_LOCK = new Object();
     private final Toml toml;
     private final File configFile;
     private final File serverDirectory;
@@ -43,7 +44,11 @@ public class TurboConfig {
     
     public static TurboConfig getInstance(File serverDirectory) {
         if (instance == null) {
-            instance = new TurboConfig(serverDirectory);
+            synchronized (INSTANCE_LOCK) {
+                if (instance == null) {
+                    instance = new TurboConfig(serverDirectory);
+                }
+            }
         }
         return instance;
     }
@@ -150,6 +155,81 @@ public class TurboConfig {
                 
                 # Validation interval in milliseconds (5 minutes)
                 validation-interval = 300000
+                
+                [quality]
+                # Quality and rendering optimizations
+                # Target TPS for quality adjustments
+                tps-threshold = 18
+                
+                # Memory usage threshold for quality adjustments (0.8 = 80%)
+                memory-threshold = 0.8
+                
+                # Adjustment interval in server ticks (1200 = 1 minute)
+                adjustment-interval-ticks = 1200
+                
+                # Enable automatic quality adjustments based on performance
+                auto-adjust.enabled = true
+                
+                # Default quality preset: LOW, MEDIUM, HIGH, ULTRA, DYNAMIC
+                default-preset = "HIGH"
+                
+                # Entity culling optimization
+                entity-culling.enabled = true
+                
+                # Particle effect optimization
+                particle-optimization.enabled = true
+                
+                [fps]
+                # FPS optimization settings
+                # Target TPS for optimization
+                target-tps = 20
+                
+                # TPS tolerance for optimization adjustments (±0.5 TPS)
+                tps-tolerance = 0.5
+                
+                # Optimization check interval in ticks (100 = 5 seconds)
+                optimization-interval-ticks = 100
+                
+                # Redstone optimization
+                redstone-optimization.enabled = true
+                
+                # Entity activation range optimization
+                entity-optimization.enabled = true
+                
+                # Hopper optimization
+                hopper-optimization.enabled = true
+                
+                # Mob spawning optimization
+                mob-spawning-optimization.enabled = true
+                
+                # Chunk ticking optimization
+                chunk-ticking-optimization.enabled = true
+                
+                # Default optimization mode: CONSERVATIVE, BALANCED, PERFORMANCE, EXTREME, ADAPTIVE
+                default-mode = "BALANCED"
+                
+                [chunk]
+                # Chunk loading optimization settings
+                # Enable intelligent chunk preloading
+                preloading.enabled = true
+                
+                # Enable parallel chunk generation
+                parallel-generation.enabled = true
+                
+                # Enable chunk caching
+                caching.enabled = true
+                
+                # Enable priority-based loading
+                priority-loading.enabled = true
+                
+                # Maximum memory usage for chunk caching (in MB)
+                max-memory-usage-mb = 512
+                
+                # Memory threshold for cache cleanup (0.8 = 80%)
+                memory-threshold = 0.8
+                
+                # Default loading strategy: CONSERVATIVE, BALANCED, AGGRESSIVE, EXTREME, ADAPTIVE
+                default-strategy = "BALANCED"
                 
                 [version-control]
                 # Minimum Minecraft version allowed to connect (e.g., "1.20.1")

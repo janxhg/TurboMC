@@ -33,32 +33,42 @@ import net.minecraft.world.level.chunk.storage.RegionStorageInfo;
  * @author TurboMC
  * @version 1.0.0
  */
-public class TurboRegionFileStorage {
+public class TurboRegionFileStorage extends RegionFileStorage {
     
     private final RegionFileStorage delegate;
-    private final TurboStorageManager storageManager;
-    private final TurboConfig config;
-    private final boolean verbose;
     private final Path regionFolder;
+    private final boolean verbose;
     private final boolean useTurboFeatures;
     
-    public TurboRegionFileStorage(RegionStorageInfo info, Path folder, boolean sync) {
-        // Use reflection to access protected constructor
+    // Cache reflection fields for performance
+    private static final java.lang.reflect.Field REGION_PATH_FIELD;
+    private static final boolean REFLECTION_AVAILABLE;
+    
+    static {
+        java.lang.reflect.Field field = null;
+        boolean available = false;
         try {
-            java.lang.reflect.Constructor<RegionFileStorage> constructor = RegionFileStorage.class.getDeclaredConstructor(
-                RegionStorageInfo.class, Path.class, boolean.class);
-            constructor.setAccessible(true);
-            this.delegate = constructor.newInstance(info, folder, sync);
+            field = RegionFile.class.getDeclaredField("regionPath");
+            field.setAccessible(true);
+            available = true;
         } catch (Exception e) {
-            throw new RuntimeException("Failed to create RegionFileStorage delegate", e);
+            System.err.println("[TurboMC][RegionStorage] Reflection not available: " + e.getMessage());
         }
+        REGION_PATH_FIELD = field;
+        REFLECTION_AVAILABLE = available;
+    }
+    
+    public TurboRegionFileStorage(RegionStorageInfo info, Path folder, boolean sync) {
+        super(info, folder, sync); // Call parent constructor
+        this.delegate = this; // Use this as delegate since we extend RegionFileStorage
         this.regionFolder = folder;
-        this.config = TurboConfig.getInstance();
+        
+        // Get config instances without storing them to avoid memory leaks
+        TurboConfig config = TurboConfig.getInstance();
         this.verbose = config.getBoolean("storage.verbose", false);
-        this.storageManager = TurboStorageManager.getInstance();
         
         // Check if TurboMC features are enabled for this world
-        this.useTurboFeatures = isTurboEnabled();
+        this.useTurboFeatures = isTurboEnabled(config);
         
         if (useTurboFeatures) {
             System.out.println("[TurboMC][RegionStorage] Turbo features enabled for: " + folder.getFileName());
@@ -113,7 +123,8 @@ public class TurboRegionFileStorage {
             }
             
             // Check if this should be saved as LRF (TurboMC format)
-            if (shouldSaveAsLRF(regionPath)) {
+            TurboConfig config = TurboConfig.getInstance();
+            if (shouldSaveAsLRF(config, regionPath)) {
                 writeToLRF(regionPath, pos, nbt);
                 return;
             }
@@ -132,12 +143,24 @@ public class TurboRegionFileStorage {
      */
     @Nullable
     private CompoundTag readFromLRF(Path regionPath, ChunkPos pos) {
+        // Input validation
+        ValidationUtils.validateNotNull(regionPath, "regionPath");
+        ValidationUtils.validateChunkCoordinates(pos);
+        
         try {
-            CompletableFuture<LRFChunkEntry> future = storageManager.loadChunk(
+            CompletableFuture<LRFChunkEntry> future = TurboStorageManager.getInstance().loadChunk(
                 regionPath, pos.x, pos.z);
             
-            // Wait for completion with timeout
-            LRFChunkEntry chunk = future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            // FIXED: Use configurable timeout with proper exception handling
+            int timeoutSeconds = TurboConfig.getInstance().getInt("storage.lrf.timeout-seconds", 5);
+            ValidationUtils.validateTimeout(timeoutSeconds);
+            
+            LRFChunkEntry chunk = TurboExceptionHandler.handleTimeout(
+                "readFromLRF", 
+                "region=" + regionPath.getFileName() + ",chunk=" + pos,
+                (attempt) -> future.get(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS),
+                3
+            );
             
             if (chunk == null) {
                 return null;
@@ -149,21 +172,25 @@ public class TurboRegionFileStorage {
                 return null;
             }
             
-            // Remove timestamp if present (last 8 bytes)
-            if (data.length > 8) {
-                byte[] nbtData = new byte[data.length - 8];
-                System.arraycopy(data, 0, nbtData, 0, nbtData.length);
-                data = nbtData;
+            // Remove timestamp if present (last 8 bytes) - FIXED: Check if timestamp exists
+            if (data.length >= 8) {
+                // Check if last 8 bytes look like a timestamp (reasonable range)
+                long potentialTimestamp = java.nio.ByteBuffer.wrap(data, data.length - 8, 8).getLong();
+                long currentTime = System.currentTimeMillis();
+                // Check if timestamp is within reasonable range (1970-2100)
+                if (potentialTimestamp > 0 && potentialTimestamp < currentTime + 86400000L * 365 * 130) { // Within 130 years
+                    byte[] nbtData = new byte[data.length - 8];
+                    System.arraycopy(data, 0, nbtData, 0, nbtData.length);
+                    data = nbtData;
+                }
             }
             
             return NbtIo.read(new DataInputStream(new java.io.ByteArrayInputStream(data)), 
                            NbtAccounter.unlimitedHeap());
             
-        } catch (java.util.concurrent.TimeoutException e) {
-            System.err.println("[TurboMC][RegionStorage] Timeout reading chunk " + pos + " from LRF");
-            return null;
         } catch (Exception e) {
-            System.err.println("[TurboMC][RegionStorage] Failed to read from LRF: " + e.getMessage());
+            TurboExceptionHandler.handleException("readFromLRF", 
+                "region=" + regionPath.getFileName() + ",chunk=" + pos, e);
             return null;
         }
     }
@@ -174,30 +201,39 @@ public class TurboRegionFileStorage {
     private void writeToLRF(Path regionPath, ChunkPos pos, CompoundTag nbt) throws IOException {
         long startTime = System.nanoTime();
         
-        // Serialize NBT to bytes
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        NbtIo.write(nbt, new DataOutputStream(baos));
-        byte[] nbtData = baos.toByteArray();
-        
-        // Add timestamp (current time in milliseconds)
-        ByteBuffer dataWithTimestamp = ByteBuffer.allocate(nbtData.length + 8);
-        dataWithTimestamp.put(nbtData);
-        dataWithTimestamp.putLong(System.currentTimeMillis());
-        dataWithTimestamp.flip();
-        
-        byte[] dataToWrite = new byte[dataWithTimestamp.remaining()];
-        dataWithTimestamp.get(dataToWrite);
-        
-        // Create chunk entry
-        LRFChunkEntry chunk = new LRFChunkEntry(pos.x, pos.z, dataToWrite);
-        
-        // Save chunk asynchronously
-        CompletableFuture<Void> future = storageManager.saveChunk(
-            regionPath, pos.x, pos.z, dataToWrite);
-        
         try {
-            // Wait for completion with timeout
-            future.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            // Serialize NBT to bytes
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            NbtIo.write(nbt, new DataOutputStream(baos));
+            byte[] nbtData = baos.toByteArray();
+            
+            // Add timestamp (current time in milliseconds)
+            ByteBuffer dataWithTimestamp = ByteBuffer.allocate(nbtData.length + 8);
+            dataWithTimestamp.put(nbtData);
+            dataWithTimestamp.putLong(System.currentTimeMillis());
+            dataWithTimestamp.flip();
+            
+            byte[] dataToWrite = new byte[dataWithTimestamp.remaining()];
+            dataWithTimestamp.get(dataToWrite);
+            
+            // Create chunk entry
+            LRFChunkEntry chunk = new LRFChunkEntry(pos.x, pos.z, dataToWrite);
+            
+            // Save chunk asynchronously with configurable timeout
+            int timeoutSeconds = TurboConfig.getInstance().getInt("storage.lrf.timeout-seconds", 5);
+            CompletableFuture<Void> future = TurboStorageManager.getInstance().saveChunk(
+                regionPath, pos.x, pos.z, dataToWrite);
+            
+            // FIXED: Use proper timeout handling with retry logic
+            TurboExceptionHandler.handleTimeout(
+                "writeToLRF",
+                "region=" + regionPath.getFileName() + ",chunk=" + pos,
+                (attempt) -> {
+                    future.get(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS);
+                    return null;
+                },
+                3
+            );
             
             long elapsed = System.nanoTime() - startTime;
             if (verbose && elapsed > 1_000_000) { // Log if > 1ms
@@ -205,8 +241,6 @@ public class TurboRegionFileStorage {
                                  " to LRF in " + elapsed / 1_000_000 + "ms");
             }
             
-        } catch (java.util.concurrent.TimeoutException e) {
-            throw new IOException("Timeout writing chunk " + pos + " to LRF", e);
         } catch (Exception e) {
             throw new IOException("Failed to write chunk " + pos + " to LRF", e);
         }
@@ -218,13 +252,30 @@ public class TurboRegionFileStorage {
     @Nullable
     private CompoundTag readFromMCAOptimized(ChunkPos pos) throws IOException {
         // Check if MCA optimization is enabled
+        TurboConfig config = TurboConfig.getInstance();
         if (!config.getBoolean("storage.mca.optimization.enabled", false)) {
             return delegate.read(pos);
         }
         
-        // Use vanilla implementation for now
-        // TODO: Implement MCA optimization with batch loading
-        return delegate.read(pos);
+        try {
+            // Get region file path
+            Path regionPath = getRegionPath(pos);
+            if (regionPath == null || !regionPath.toString().endsWith(".mca")) {
+                return delegate.read(pos);
+            }
+            
+            // Use optimized MCA reader
+            OptimizedMCAReader reader = new OptimizedMCAReader(regionPath);
+            try {
+                return reader.readChunkPublic(pos.x, pos.z);
+            } finally {
+                reader.close();
+            }
+            
+        } catch (Exception e) {
+            System.err.println("[TurboMC][RegionStorage] Optimized MCA read failed, falling back to vanilla: " + e.getMessage());
+            return delegate.read(pos);
+        }
     }
     
     /**
@@ -232,6 +283,7 @@ public class TurboRegionFileStorage {
      */
     private void writeToMCAOptimized(ChunkPos pos, CompoundTag nbt) throws IOException {
         // Check if MCA optimization is enabled
+        TurboConfig config = TurboConfig.getInstance();
         if (!config.getBoolean("storage.mca.optimization.enabled", false)) {
             delegate.write(pos, nbt);
             return;
@@ -256,21 +308,34 @@ public class TurboRegionFileStorage {
         try {
             RegionFile regionFile = delegate.getRegionFile(pos);
             if (regionFile != null) {
-                // Use reflection to get regionPath since it's not directly accessible
+                // FIXED: Use cached reflection for performance
                 try {
-                    java.lang.reflect.Field regionPathField = RegionFile.class.getDeclaredField("regionPath");
-                    regionPathField.setAccessible(true);
-                    return (Path) regionPathField.get(regionFile);
+                    if (REFLECTION_AVAILABLE && REGION_PATH_FIELD != null) {
+                        Path regionPath = (Path) REGION_PATH_FIELD.get(regionFile);
+                        
+                        // FIXED: In FULL_LRF mode, ensure we use .lrf extension
+                        if (useTurboFeatures) {
+                            TurboConfig config = TurboConfig.getInstance();
+                            if (shouldSaveAsLRF(config, regionPath)) {
+                                int regionX = pos.x >> 5;
+                                int regionZ = pos.z >> 5;
+                                return regionFolder.resolve(String.format("r.%d.%d.lrf", regionX, regionZ));
+                            }
+                        }
+                        
+                        int regionX = pos.x >> 5;
+                        int regionZ = pos.z >> 5;
+                        return regionFolder.resolve(String.format("r.%d.%d.mca", regionX, regionZ));
+                    }
                 } catch (Exception e) {
-                    // Fallback: construct path from region coordinates
-                    int regionX = pos.x >> 5;
-                    int regionZ = pos.z >> 5;
-                    return regionFolder.resolve(String.format("r.%d.%d.mca", regionX, regionZ));
+                    if (verbose) {
+                        System.err.println("[TurboMC][RegionStorage] Error getting region path: " + e.getMessage());
+                    }
                 }
             }
         } catch (Exception e) {
             if (verbose) {
-                System.err.println("[TurboMC][RegionStorage] Error getting region path: " + e.getMessage());
+                System.err.println("[TurboMC][RegionStorage] Error getting region file: " + e.getMessage());
             }
         }
         return null;
@@ -286,12 +351,15 @@ public class TurboRegionFileStorage {
     /**
      * Check if chunks should be saved as LRF format.
      */
-    private boolean shouldSaveAsLRF(Path regionPath) {
+    private boolean shouldSaveAsLRF(TurboConfig config, Path regionPath) {
         if (!TurboConfig.isInitialized()) {
             return false;
         }
         
-        TurboConfig config = TurboConfig.getInstance();
+        if (config == null) {
+            config = TurboConfig.getInstance();
+        }
+        
         String conversionMode = config.getString("storage.conversion-mode", "manual");
         
         // In FULL_LRF mode, always create LRF files directly (no MCA conversion)
@@ -314,14 +382,16 @@ public class TurboRegionFileStorage {
     /**
      * Check if TurboMC features are enabled.
      */
-    private boolean isTurboEnabled() {
+    private boolean isTurboEnabled(TurboConfig config) {
         if (!TurboConfig.isInitialized()) {
             return false;
         }
         
-        TurboConfig config = TurboConfig.getInstance();
+        if (config == null) {
+            config = TurboConfig.getInstance();
+        }
         
-        // Always enable in FULL_LRF mode
+        // Check for FULL_LRF mode first (most common case)
         String conversionMode = config.getString("storage.conversion-mode", "manual");
         if (ConversionMode.FULL_LRF.equals(ConversionMode.fromString(conversionMode))) {
             return true;
@@ -341,11 +411,35 @@ public class TurboRegionFileStorage {
             return true; // Skip MCA validation for now
         }
         
-        // TODO: Implement validation when method is available
-        if (verbose) {
-            System.out.println("[TurboMC][RegionStorage] Validation not yet implemented for " + regionPath);
+        try {
+            // Use ChunkIntegrityValidator for LRF files
+            LRFRegionReader reader = new LRFRegionReader(regionPath);
+            ChunkIntegrityValidator validator = new ChunkIntegrityValidator(regionPath);
+            
+            try {
+                java.util.List<ChunkIntegrityValidator.IntegrityReport> reports = validator.validateRegion(reader).get();
+                
+                // Check if any chunks are corrupted
+                boolean hasCorruption = reports.stream()
+                    .anyMatch(ChunkIntegrityValidator.IntegrityReport::isCorrupted);
+                
+                if (verbose) {
+                    System.out.println("[TurboMC][RegionStorage] Validation completed for " + regionPath + 
+                                     ": " + reports.size() + " chunks checked, " + 
+                                     (hasCorruption ? "corruption found" : "all good"));
+                }
+                
+                return !hasCorruption;
+                
+            } finally {
+                validator.close();
+                reader.close();
+            }
+            
+        } catch (Exception e) {
+            System.err.println("[TurboMC][RegionStorage] Validation failed for " + regionPath + ": " + e.getMessage());
+            return false;
         }
-        return true;
     }
     
     /**
@@ -374,38 +468,60 @@ public class TurboRegionFileStorage {
      * Get comprehensive statistics.
      */
     public StorageStats getStorageStats() {
-        if (storageManager != null) {
-            try {
-                return new StorageStats(
-                    storageManager.getStats(),
-                    getRegionFileCount(),
-                    getCacheHitRate()
-                );
-            } catch (Exception e) {
-                return new StorageStats(null, 0, 0.0);
-            }
+        try {
+            TurboStorageManager manager = TurboStorageManager.getInstance();
+            return new StorageStats(
+                manager.getStats(),
+                getRegionFileCount(),
+                getCacheHitRate()
+            );
+        } catch (Exception e) {
+            return new StorageStats(null, 0, 0.0);
         }
-        return new StorageStats(null, 0, 0.0);
     }
     
     private int getRegionFileCount() {
-        // TODO: Implement region file counting
-        return 0;
+        try {
+            if (!java.nio.file.Files.isDirectory(regionFolder)) {
+                return 0;
+            }
+            return (int) java.nio.file.Files.list(regionFolder)
+                .filter(path -> path.toString().endsWith(".lrf") || path.toString().endsWith(".mca"))
+                .count();
+        } catch (Exception e) {
+            if (verbose) {
+                System.err.println("[TurboMC][RegionStorage] Error counting region files: " + e.getMessage());
+            }
+            return 0;
+        }
     }
     
     private double getCacheHitRate() {
-        // TODO: Implement cache hit rate calculation
-        return 0.0;
+        try {
+            TurboStorageManager manager = TurboStorageManager.getInstance();
+            TurboStorageManager.StorageManagerStats stats = manager.getStats();
+            return stats.getCacheHitRate();
+        } catch (Exception e) {
+            if (verbose) {
+                System.err.println("[TurboMC][RegionStorage] Error getting cache hit rate: " + e.getMessage());
+            }
+            return 0.0;
+        }
     }
     
     /**
      * Get storage statistics for this region storage.
      */
     public TurboStorageManager.StorageManagerStats getTurboStats() {
-        if (storageManager != null) {
-            return storageManager.getStats();
+        try {
+            TurboStorageManager manager = TurboStorageManager.getInstance();
+            return manager.getStats();
+        } catch (Exception e) {
+            if (verbose) {
+                System.err.println("[TurboMC][RegionStorage] Error getting Turbo stats: " + e.getMessage());
+            }
+            return null;
         }
-        return null;
     }
     
     /**
@@ -419,15 +535,9 @@ public class TurboRegionFileStorage {
     }
     
     public void close() throws IOException {
-        if (storageManager != null) {
-            try {
-                storageManager.close();
-                if (verbose) {
-                    System.out.println("[TurboMC][RegionStorage] Closed TurboMC resources for world");
-                }
-            } catch (Exception e) {
-                System.err.println("[TurboMC][RegionStorage] Error closing TurboMC resources: " + e.getMessage());
-            }
+        // FIXED: Don't close singleton storage manager, just cleanup local resources
+        if (verbose) {
+            System.out.println("[TurboMC][RegionStorage] Closed TurboMC resources for world");
         }
     }
     
@@ -452,7 +562,7 @@ public class TurboRegionFileStorage {
     }
     
     /**
-     * Add validateRegion overload for compatibility.
+     * Validate region for compatibility.
      */
     public CompletableFuture<java.util.List<ChunkIntegrityValidator.IntegrityReport>> validateRegion(int regionX, int regionZ) {
         if (!useTurboFeatures) {
@@ -466,7 +576,34 @@ public class TurboRegionFileStorage {
             return CompletableFuture.completedFuture(new java.util.ArrayList<>());
         }
         
-        // TODO: Implement actual validation when validator is available
-        return CompletableFuture.completedFuture(new java.util.ArrayList<>());
+        try {
+            // Use ChunkIntegrityValidator for actual validation
+            LRFRegionReader reader = new LRFRegionReader(regionPath);
+            ChunkIntegrityValidator validator = new ChunkIntegrityValidator(regionPath);
+            
+            try {
+                java.util.List<ChunkIntegrityValidator.IntegrityReport> reports = validator.validateRegion(reader).get();
+                
+                // Check if any chunks are corrupted
+                boolean hasCorruption = reports.stream()
+                    .anyMatch(ChunkIntegrityValidator.IntegrityReport::isCorrupted);
+                
+                if (verbose) {
+                    System.out.println("[TurboMC][RegionStorage] Validation completed for " + regionFileName + 
+                                     ": " + reports.size() + " chunks checked, " + 
+                                     (hasCorruption ? "corruption found" : "all good"));
+                }
+                
+                return CompletableFuture.completedFuture(reports);
+                
+            } finally {
+                validator.close();
+                reader.close();
+            }
+            
+        } catch (Exception e) {
+            System.err.println("[TurboMC][RegionStorage] Failed to create validator for region " + regionFileName + ": " + e.getMessage());
+            return CompletableFuture.completedFuture(new java.util.ArrayList<>());
+        }
     }
 }
