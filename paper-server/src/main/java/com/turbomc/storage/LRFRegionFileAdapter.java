@@ -177,12 +177,26 @@ public class LRFRegionFileAdapter extends RegionFile {
             long writeOffset = (currentSize + 255) & ~255;
             long padding = writeOffset - currentSize;
             
+            // Advance channel to write position (handling padding via gap if we just seek?)
+            // No, channel.position(newPos) does NOT fill gap with zeroes automatically on some OS/FS?
+            // Usually it does (sparse files). But random bytes might appear? 
+            // Better write zeroes explicitly if padding is small.
             if (padding > 0) {
-                // Pad with zeroes
-                channel.write(ByteBuffer.allocate((int)padding), currentSize);
+                 channel.position(currentSize);
+                 channel.write(ByteBuffer.allocate((int)padding));
             }
+            channel.position(writeOffset); // Ensure we are at aligned offset
+
+            // Zero-Copy Gathering Write
+            // 1. Data Buffer (Directly from compression service if possible, currently we have byte[])
+            ByteBuffer dataBuf = ByteBuffer.wrap(compressedData);
+            // 2. Timestamp Buffer (8 bytes)
+            ByteBuffer tsBuf = ByteBuffer.allocate(8);
+            tsBuf.putLong(System.currentTimeMillis());
+            tsBuf.flip();
             
-            channel.write(dataToWrite, writeOffset);
+            // Write both buffers in one OS call
+            channel.write(new ByteBuffer[]{dataBuf, tsBuf});
             
             // Update header
             // size is passed in bytes; header converts to 4KB sectors internally (rounding up)
