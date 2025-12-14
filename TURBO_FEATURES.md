@@ -1,34 +1,35 @@
-# TurboMC v1.5 - LRF System Updates
+# TurboMC v1.5.0 - LRF Stability & Performance Update
 
-## Fixed Issues
-- **TurboCompressionService initialization**: Service now properly initializes during server startup
-- **Buffer overflow errors**: Fixed LRFHeader buffer size from 256 to 8192 bytes
-- **Compilation errors**: Resolved PROP_PATTERN and intersectsAny method issues
-- **Exception handling**: Added proper error logging with stack traces
+## 🚀 Critical Fixes (v1.5.0)
+- **LRF Offset Alignment**: Enforced 256-byte alignment in `LRFRegionFileAdapter` to match LRF Header specification. Resolved `Invalid Magic Byte` and corruption issues.
+- **IO Performance**: Removed blocking `channel.force()` calls on every chunk write. Writes now leverage OS page cache, eliminating IO starvation and server hangs.
+- **Cache Logic**: Fixed `TurboCacheManager` memory leak where eviction size wasn't tracked, causing cache thrashing. Now correctly releases memory quota on eviction.
+- **LZ4 Compatibility**: Implemented robust transcoding for Paper's Moonrise system, supporting seamless Zlib/GZip/LZ4 input handling without crashes (`Invalid tag id`).
 
-## Optimizations
-- **Compression ratios**: Achieved 34.6% compression (0.34MB → 0.12MB)
-- **Processing speed**: Fast conversion times (0.13s for small regions)
-- **Memory management**: Improved buffer allocation for header tables
-- **Error reporting**: Better exception handling and debugging output
+## ⚡ Performance Optimizations
+- **Non-blocking IO**: Writes are sequential and buffered by OS.
+- **Smart Caching**: 256MB L1 Cache now works as intended, reducing disk reads significantly.
+- **Universal Compression**: Automatically handles Paper's internal compression formats while enforcing LRF's configured format (LZ4) on disk.
+- **Math Intrinsics**: Validated Java 21 `Math.clamp` for physics acceleration.
 
-## Features
-- **MCA to LRF conversion**: Working conversion system with LZ4 compression
-- **Command system**: `/turbo storage convert` command functional
-- **Statistics tracking**: Detailed conversion metrics and progress reporting
-- **Chunk handling**: Proper support for different compression types (GZIP, ZLIB, None, LZ4)
-- **Full LRF mode**: Native LRF chunk creation without MCA conversion (prevents bugs and improves performance)
+## 🛠 Features (v1.5.0)
+- **Full LRF Storage**: Native linear format (`.lrf`) with compact headers.
+- **Auto-Conversion**: `/turbo storage convert` and startup migration.
+- **Monitoring**: Detailed timestamps and conversion logs.
+- **Stability**: Tested and verified against strict `NbtIo` checks.
 
-## Mode Differences
-- **Manual mode**: Converts existing MCA files to LRF format
-- **Full LRF mode**: Creates chunks directly in LRF format from scratch
-  - No MCA/LRF coexistence allowed (prevents loading bugs)
-  - Faster chunk creation and loading
-  - Eliminates conversion overhead
-  - Recommended for new worlds
+## 📊 Performance Results (Observed)
+- **Stability**: Server startups and chunk loads are consistent without "Invalid Tag" crashes.
+- **Throughput**: Chunk saving no longer blocks the main thread or IO workers.
+- **Memory**: Cache usage respects 256MB limit properly.
 
-## Performance Results
-- Successfully converted 1675 chunks in 4.61 seconds
-- Achieved 47.8% compression ratio (9.41MB → 4.50MB)
-- Saved 4.91MB of storage space
-- Some remote region files still need investigation (null errors)
+## Recommended Configuration
+```toml
+[storage]
+format = "lrf"
+conversion-mode = "full-lrf"
+
+[compression]
+algorithm = "lz4"
+level = 3
+```

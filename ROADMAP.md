@@ -18,6 +18,12 @@
 
 ---
 
+## 📅 Version Status
+**Current Stable:** v1.5.0 (LRF Stable)
+**Next Milestone:** v1.6.0 (Tools & Profiling)
+
+---
+
 ## 🎯 Priorities Overview
 
 ### 🔴 **Critical (Fase 1 - Fundación)**
@@ -161,7 +167,7 @@ byte[] compressed = data.compress();
 ### Linear Region Format (LRF) Implementation
 - [x] `LRFFileParser` - Parser del formato binario ✅ v1.3.0
 - [x] `LRFSequentialWriter` - Escritor optimizado ✅ v1.3.0
-- [x] `LRFHeader` - Gestión de metadata y offsets ✅ v1.3.0
+- [x] `LRFHeader` - Gestión de metadata y offsets (256-byte aligned) ✅ v1.5.0
 - [x] `LRFConstants` - Constantes y especificaciones ✅ v1.3.0
 - [x] `LRFChunkEntry` - Estructura de entrada de chunk ✅ v1.3.0
 - [x] `AnvilRegionReader` - Lector de archivos MCA ✅ v1.3.0
@@ -169,10 +175,11 @@ byte[] compressed = data.compress();
 - [x] `MCAToLRFConverter` - Conversor MCA → LRF ✅ v1.3.0
 - [x] `LRFToMCAConverter` - Conversor LRF → MCA ✅ v1.3.0
 - [x] `RegionConverter` - Auto-detección y conversión unificada ✅ v1.3.0
-- [x] `ChunkBatchLoader` - Carga múltiples chunks en paralelo v1.4.0
-- [x] `ChunkBatchSaver` - Escritura por lotes v1.4.0
-- [x] mmap read-ahead engine para SSD/NVMe v1.4.0
-- [x] Validación de integridad (checksums) v1.4.0
+- [x] `ChunkBatchLoader` - Carga múltiples chunks en paralelo ✅ v1.4.0
+- [x] `ChunkBatchSaver` - Escritura por lotes ✅ v1.4.0
+- [x] mmap read-ahead engine para SSD/NVMe ✅ v1.4.0
+- [x] Validación de integridad (checksums) ✅ v1.4.0
+- [x] **Stability Fixes**: Alignment, Cache Thrashing, IO Blocking ✅ v1.5.0
 
 
 ---
@@ -192,10 +199,10 @@ L3: ChunkColdStorage (LRF/Disco)
 ```
 
 **Componentes:**
-- [ ] `ChunkHotCache` (RAM - Java Heap)
+- [x] `TurboCacheManager` (RAM - Java Heap) ✅ v1.5.0 (Fixed Eviction)
 - [ ] `ChunkWarmCache` (mmap - Off-Heap)
 - [ ] `ChunkColdStorage` (LRF)
-- [ ] Política de evicción LRU
+- [x] Política de evicción LRU (Size-based) ✅ v1.5.0
 - [ ] Estadísticas: hits/misses por tick
 - [ ] Telemetría: `/turbo cache stats`
 
@@ -544,8 +551,8 @@ mode: turbo  # or 'vanilla'
 - [x] Zlib/LZ4 Dual-algorithm system ✅ v1.2.0
 - [x] TOML Configuration ✅ v1.2.0
 - [x] Chunk storage compression ✅ v1.2.0
-- [ ] LRF Format v1.0 (deferred to Fase 2) v1.3.0
-- [ ] MCA→LRF Converter (deferred to Fase 2) v1.3.0
+- [x] LRF Format v1.0 (deferred to Fase 2) ✅ v1.5.0
+- [x] MCA→LRF Converter (deferred to Fase 2) ✅ v1.3.0
 - [ ] Basic TurboAPI (deferred to Fase 2)
 
 ## Fase 2: Diferenciación (Q2 2025)
@@ -580,5 +587,5 @@ mode: turbo  # or 'vanilla'
 
 ---
 
-**Última actualización:** 2025-12-08  
-**Versión del documento:** 1.0.0
+**Última actualización:** 2025-12-14
+**Versión del documento:** 1.5.0

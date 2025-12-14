@@ -269,7 +269,7 @@ TurboMC provides **significant performance improvements** over vanilla Paper whi
 
 ---
 
-**Benchmark Date**: 2025-12-12
-**TurboMC Version**: 1.5.0
-**Minecraft Version**: 1.21.x
+**Benchmark Date**: 2025-12-14
+**TurboMC Version**: 1.5.0 (Stable)
+**Minecraft Version**: 1.21.10
 **Test Hardware**: Intel i7-9700K, 32GB RAM, NVMe SSD

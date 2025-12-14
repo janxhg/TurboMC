@@ -16,7 +16,9 @@ TurboMC es un fork de alto rendimiento de PaperMC optimizado para servidores con
 ### ⚡ Rendimiento Mejorado
 - **Conversión rápida**: 1675 chunks en 4.61 segundos
 - **Compresión eficiente**: Hasta 47.8% de ahorro de espacio
-- **Gestión de memoria** optimizada
+- **Gestión de memoria** optimizada (256MB Cache Limitado)
+- **Zero-Lag IO**: Removed IO starvation (channel.force removed)
+- **Estabilidad**: Fixed Invalid Magic Byte crashes (Alignment checked)
 - **Manejo mejorado** de errores y logging
 
 ### 🔄 Modos de Operación
