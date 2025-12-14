@@ -84,6 +84,13 @@ public class LRFHeader {
     }
     
     /**
+     * Create empty default header.
+     */
+    public LRFHeader() {
+        this(LRFConstants.FORMAT_VERSION, 0, LRFConstants.COMPRESSION_LZ4);
+    }
+    
+    /**
      * Read header from a ByteBuffer with caching support.
      * 
      * @param buffer ByteBuffer positioned at start of header

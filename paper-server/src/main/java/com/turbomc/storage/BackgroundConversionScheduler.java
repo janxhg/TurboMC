@@ -2,7 +2,9 @@ package com.turbomc.storage;
 
 import com.turbomc.config.TurboConfig;
 import com.turbomc.storage.converter.RegionConverter;
+import com.turbomc.storage.converter.MCAToLRFConverter;
 import com.turbomc.storage.StorageFormat;
+import com.turbomc.storage.LRFConstants;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -15,6 +17,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.stream.Stream;
+import java.lang.reflect.Method; // Importación agregada
 
 /**
  * Intelligent background conversion scheduler for MCA to LRF conversion.
@@ -159,12 +162,60 @@ public class BackgroundConversionScheduler implements AutoCloseable {
     }
     
     /**
-     * Get server idle time (simplified implementation).
+     * Get server idle time based on player activity and TPS.
      */
     private long getIdleTime() {
-        // This is a simplified implementation
-        // In a real server, you'd track player activity, chunk generation, etc.
-        return minIdleTimeMs + 1000; // Assume idle for testing
+        try {
+            // Check if server has players
+            int playerCount = getPlayerCount();
+            if (playerCount > 0) {
+                return 0; // Server is not idle if players are online
+            }
+            
+            // Check TPS (simplified: assume we have access to server metrics)
+            double currentTps = getCurrentTps();
+            if (currentTps < 18.0) {
+                return 0; // Server is busy if TPS is low
+            }
+            
+            // If no players and TPS is good, consider server idle
+            return minIdleTimeMs + 1000;
+        } catch (Exception e) {
+            // Fallback: assume not idle if we can't measure
+            return 0;
+        }
+    }
+    
+    /**
+     * Get current player count on server.
+     */
+    private int getPlayerCount() {
+        try {
+            // Try to get player count from Paper/Bukkit server
+            org.bukkit.Bukkit.getServer().getOnlinePlayers().size();
+            return org.bukkit.Bukkit.getServer().getOnlinePlayers().size();
+        } catch (Exception e) {
+            // Fallback: assume players are online if we can't check
+            return 1;
+        }
+    }
+    
+    /**
+     * Get current server TPS.
+     */
+    private double getCurrentTps() {
+        try {
+            // Try to get TPS from Paper's performance API using reflection
+            Class<?> serverClass = org.bukkit.Bukkit.getServer().getClass();
+            Method getTicksPerSecondMethod = serverClass.getMethod("getTicksPerSecond");
+            double[] tps = (double[]) getTicksPerSecondMethod.invoke(org.bukkit.Bukkit.getServer());
+            if (tps != null && tps.length > 0) {
+                return tps[0]; // Return 1-minute average
+            }
+        } catch (Exception e) {
+            // Fallback
+        }
+        return 20.0; // Assume good TPS if we can't measure
     }
     
     /**
@@ -222,8 +273,26 @@ public class BackgroundConversionScheduler implements AutoCloseable {
             try {
                 LOGGER.info("[TurboMC][Background] Converting region: {}", mcaFile.getFileName());
                 
-                RegionConverter converter = new RegionConverter(true);
-                converter.convertRegionDirectory(mcaFile.getParent(), mcaFile.getParent(), targetFormat);
+                // Convert only this specific MCA file to its corresponding LRF file
+                MCAToLRFConverter converter = new MCAToLRFConverter(true);
+                String fileName = mcaFile.getFileName().toString();
+                String lrfName = fileName.replace(LRFConstants.MCA_EXTENSION, LRFConstants.LRF_EXTENSION);
+                Path lrfPath = mcaFile.getParent().resolve(lrfName);
+                
+                // Use default LZ4 compression for background conversion
+                converter.convert(mcaFile, lrfPath, LRFConstants.COMPRESSION_LZ4);
+                
+                // Delete original MCA if backup is not requested
+                TurboConfig config = TurboConfig.getInstance();
+                boolean backupOriginalMca = config.getBoolean("storage.backup-original-mca", false);
+                if (!backupOriginalMca) {
+                    try {
+                        Files.deleteIfExists(mcaFile);
+                        LOGGER.debug("[TurboMC][Background] Deleted original MCA after conversion: {}", mcaFile.getFileName());
+                    } catch (Exception e) {
+                        LOGGER.warn("[TurboMC][Background] Failed to delete original MCA: {}", mcaFile.getFileName(), e);
+                    }
+                }
                 
                 convertedRegions.incrementAndGet();
                 LOGGER.info("[TurboMC][Background] Successfully converted: {}/{} regions completed",

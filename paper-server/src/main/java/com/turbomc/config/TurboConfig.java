@@ -59,6 +59,10 @@ public class TurboConfig {
         }
         return instance;
     }
+
+    public static TurboConfig get() {
+        return getInstance();
+    }
     
     public static boolean isInitialized() {
         return instance != null;

@@ -83,7 +83,7 @@ public class TurboCompressionService {
      * @param compressed Compressed data
      * @return Decompressed data
      */
-    public byte[] decompress(byte[] compressed) {
+    public byte[] decompress(byte[] compressed) throws java.io.IOException {
         if (compressed == null || compressed.length == 0) {
             return new byte[0];
         }
@@ -113,8 +113,9 @@ public class TurboCompressionService {
                 }
             }
             
-            System.err.println("[TurboMC] Decompression failed: " + e.getMessage());
-            return compressed; // Return original data if all attempts fail
+            // Critical Change: Throw Exception instead of returning garbage
+            throw new java.io.IOException("Failed to decompress data (Magic: " + 
+                String.format("0x%02X", compressed[0]) + ")", e);
         }
     }
     

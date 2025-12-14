@@ -73,6 +73,7 @@ public class TurboChunkLoadingOptimizer {
     private final ConcurrentHashMap<String, ChunkCache> chunkCaches;
     
     // Configuration
+    private final boolean optimizerEnabled;
     private final boolean preloadingEnabled;
     private final boolean parallelGenerationEnabled;
     private final boolean cachingEnabled;
@@ -86,10 +87,11 @@ public class TurboChunkLoadingOptimizer {
         this.totalChunksLoaded = new AtomicLong(0);
         this.totalLoadTime = new AtomicLong(0);
         this.currentLoadingChunks = new AtomicInteger(0);
-        this.optimizationsEnabled = new AtomicBoolean(true);
         
         // Load configuration
         TurboConfig config = TurboConfig.getInstance();
+        this.optimizerEnabled = config.getBoolean("chunk.optimizer.enabled", false);
+        this.optimizationsEnabled = new AtomicBoolean(optimizerEnabled);
         this.preloadingEnabled = config.getBoolean("chunk.preloading.enabled", true);
         this.parallelGenerationEnabled = config.getBoolean("chunk.parallel-generation.enabled", true);
         this.cachingEnabled = config.getBoolean("chunk.caching.enabled", true);
@@ -99,15 +101,23 @@ public class TurboChunkLoadingOptimizer {
         
         // Set initial strategy
         String strategyName = config.getString("chunk.default-strategy", "BALANCED");
-        this.currentStrategy = LoadingStrategy.valueOf(strategyName.toUpperCase());
+        try {
+            this.currentStrategy = LoadingStrategy.valueOf(strategyName.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            this.currentStrategy = LoadingStrategy.BALANCED;
+        }
         
-        System.out.println("[TurboMC][Chunk] Chunk Loading Optimizer initialized:");
-        System.out.println("  - Default Strategy: " + currentStrategy.getName());
-        System.out.println("  - Preloading: " + (preloadingEnabled ? "ENABLED" : "DISABLED"));
-        System.out.println("  - Parallel Generation: " + (parallelGenerationEnabled ? "ENABLED" : "DISABLED"));
-        System.out.println("  - Caching: " + (cachingEnabled ? "ENABLED" : "DISABLED"));
-        System.out.println("  - Priority Loading: " + (priorityLoadingEnabled ? "ENABLED" : "DISABLED"));
-        System.out.println("  - Max Memory Usage: " + maxMemoryUsage + "MB");
+        if (optimizerEnabled) {
+            System.out.println("[TurboMC][Chunk] Chunk Loading Optimizer initialized (ENABLED):");
+            System.out.println("  - Default Strategy: " + currentStrategy.getName());
+            System.out.println("  - Preloading: " + (preloadingEnabled ? "ENABLED" : "DISABLED"));
+            System.out.println("  - Parallel Generation: " + (parallelGenerationEnabled ? "ENABLED" : "DISABLED"));
+            System.out.println("  - Caching: " + (cachingEnabled ? "ENABLED" : "DISABLED"));
+            System.out.println("  - Priority Loading: " + (priorityLoadingEnabled ? "ENABLED" : "DISABLED"));
+            System.out.println("  - Max Memory Usage: " + maxMemoryUsage + "MB");
+        } else {
+            System.out.println("[TurboMC][Chunk] Chunk Loading Optimizer initialized (DISABLED - set chunk.optimizer.enabled=true to enable)");
+        }
     }
     
     /**
@@ -130,6 +140,11 @@ public class TurboChunkLoadingOptimizer {
      * Initialize chunk loading optimizer.
      */
     public void initialize() {
+        if (!optimizerEnabled) {
+            System.out.println("[TurboMC][Chunk] Chunk Loading Optimizer is disabled. To enable, set chunk.optimizer.enabled=true in turbo.toml");
+            return;
+        }
+        
         System.out.println("[TurboMC][Chunk] Starting chunk loading optimizations...");
         
         if (optimizationsEnabled.get()) {
@@ -144,7 +159,7 @@ public class TurboChunkLoadingOptimizer {
      * Setup chunk caches for all worlds.
      */
     private void setupChunkCaches() {
-        if (!cachingEnabled) return;
+        if (!optimizerEnabled || !cachingEnabled) return;
         
         int cacheSize = currentStrategy.getCacheSize();
         if (cacheSize <= 0) {
@@ -161,6 +176,15 @@ public class TurboChunkLoadingOptimizer {
     private void startPerformanceMonitoring() {
         System.out.println("[TurboMC][Chunk] Performance monitoring started");
         // This would be integrated with server tick loop
+    }
+    
+    /**
+     * Load a chunk with vanilla strategy (fallback).
+     */
+    private CompletableFuture<ChunkLoadResult> loadChunkVanilla(String worldName, ChunkPos chunkPos, String targetStatus) {
+        return CompletableFuture.completedFuture(
+            new ChunkLoadResult(chunkPos, targetStatus, true, System.currentTimeMillis())
+        );
     }
     
     /**
@@ -199,37 +223,24 @@ public class TurboChunkLoadingOptimizer {
         }
         
         // Handle completion
-        return future.whenComplete((result, throwable) -> {
+        return future.thenApply(result -> {
             currentLoadingChunks.decrementAndGet();
             long loadTime = System.nanoTime() - startTime;
             
-            if (throwable == null && result != null && cachingEnabled) {
+            if (result != null && cachingEnabled) {
                 // Cache the result
                 ChunkCache cache = getChunkCache(worldName);
                 cache.put(chunkPos, targetStatus, result);
             }
             
-            updateMetrics(worldName, loadTime, throwable == null);
+            updateMetrics(worldName, loadTime, true);
             
             // Trigger preloading if enabled
-            if (preloadingEnabled && throwable == null) {
+            if (preloadingEnabled) {
                 triggerPreloading(worldName, chunkPos);
             }
-        });
-    }
-    
-    /**
-     * Load chunk with vanilla method (fallback).
-     */
-    private CompletableFuture<ChunkLoadResult> loadChunkVanilla(String worldName, ChunkPos chunkPos, String targetStatus) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                // This would integrate with Paper's chunk loading system
-                Thread.sleep(10); // Simulate loading time
-                return new ChunkLoadResult(chunkPos, targetStatus, true, System.currentTimeMillis());
-            } catch (Exception e) {
-                return new ChunkLoadResult(chunkPos, targetStatus, false, System.currentTimeMillis());
-            }
+            
+            return result;
         });
     }
     
@@ -240,7 +251,6 @@ public class TurboChunkLoadingOptimizer {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 // High priority loading - less delay, more resources
-                Thread.sleep(5); // Simulate faster loading
                 return new ChunkLoadResult(chunkPos, targetStatus, true, System.currentTimeMillis());
             } catch (Exception e) {
                 return new ChunkLoadResult(chunkPos, targetStatus, false, System.currentTimeMillis());
@@ -255,7 +265,6 @@ public class TurboChunkLoadingOptimizer {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 // Parallel generation - multiple threads working together
-                Thread.sleep(8); // Simulate parallel loading
                 return new ChunkLoadResult(chunkPos, targetStatus, true, System.currentTimeMillis());
             } catch (Exception e) {
                 return new ChunkLoadResult(chunkPos, targetStatus, false, System.currentTimeMillis());

@@ -40,24 +40,6 @@ public class TurboRegionFileStorage extends RegionFileStorage {
     private final boolean verbose;
     private final boolean useTurboFeatures;
     
-    // Cache reflection fields for performance
-    private static final java.lang.reflect.Field REGION_PATH_FIELD;
-    private static final boolean REFLECTION_AVAILABLE;
-    
-    static {
-        java.lang.reflect.Field field = null;
-        boolean available = false;
-        try {
-            field = RegionFile.class.getDeclaredField("regionPath");
-            field.setAccessible(true);
-            available = true;
-        } catch (Exception e) {
-            System.err.println("[TurboMC][RegionStorage] Reflection not available: " + e.getMessage());
-        }
-        REGION_PATH_FIELD = field;
-        REFLECTION_AVAILABLE = available;
-    }
-    
     public TurboRegionFileStorage(RegionStorageInfo info, Path folder, boolean sync) {
         super(info, folder, sync); // Call parent constructor
         this.delegate = this; // Use this as delegate since we extend RegionFileStorage
@@ -91,7 +73,36 @@ public class TurboRegionFileStorage extends RegionFileStorage {
                 return delegate.read(pos);
             }
             
-            // Check if this is an LRF file (TurboMC format)
+            // Check configuration for on-demand conversion
+            TurboConfig config = TurboConfig.getInstance();
+            String conversionMode = config.getString("storage.conversion-mode", "manual");
+            String storageFormat = config.getString("storage.format", "auto");
+            boolean onDemand = ConversionMode.ON_DEMAND.equals(ConversionMode.fromString(conversionMode));
+            boolean targetIsLrf = "lrf".equalsIgnoreCase(storageFormat);
+
+            // Compute canonical LRF/MCA region paths for this chunk
+            int regionX = pos.x >> 5;
+            int regionZ = pos.z >> 5;
+            Path lrfRegionPath = regionFolder.resolve(String.format("r.%d.%d.lrf", regionX, regionZ));
+            Path mcaRegionPath = regionFolder.resolve(String.format("r.%d.%d.mca", regionX, regionZ));
+
+            // If an LRF region already exists, always prefer it
+            if (java.nio.file.Files.exists(lrfRegionPath)) {
+                return readFromLRF(lrfRegionPath, pos);
+            }
+
+            // In ON_DEMAND mode targeting LRF, lazily migrate chunks from MCA
+            if (onDemand && targetIsLrf && java.nio.file.Files.exists(mcaRegionPath)) {
+                // Read from MCA (optimized or vanilla)
+                CompoundTag nbt = readFromMCAOptimized(pos);
+                if (nbt != null) {
+                    // Write this single chunk into the LRF region file
+                    writeToLRF(lrfRegionPath, pos, nbt);
+                }
+                return nbt;
+            }
+
+            // Check if this is an LRF file (TurboMC format) according to current regionPath
             if (isLRFFile(regionPath)) {
                 return readFromLRF(regionPath, pos);
             }
@@ -241,6 +252,29 @@ public class TurboRegionFileStorage extends RegionFileStorage {
                                  " to LRF in " + elapsed / 1_000_000 + "ms");
             }
             
+            // Enforce FULL_LRF-style semantics on disk where appropriate:
+            // if we are writing to an LRF region file and backups are not requested,
+            // remove the corresponding MCA region file so that the directory converges to only .lrf.
+            try {
+                TurboConfig config = TurboConfig.getInstance();
+                boolean backupOriginalMca = config.getBoolean("storage.backup-original-mca", false);
+                if (!backupOriginalMca && isLRFFile(regionPath)) {
+                    int regionX = pos.x >> 5;
+                    int regionZ = pos.z >> 5;
+                    Path mcaPath = regionFolder.resolve(String.format("r.%d.%d.mca", regionX, regionZ));
+                    if (java.nio.file.Files.exists(mcaPath)) {
+                        java.nio.file.Files.deleteIfExists(mcaPath);
+                        if (verbose) {
+                            System.out.println("[TurboMC][RegionStorage] Removed MCA region after LRF write: " + mcaPath.getFileName());
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                if (verbose) {
+                    System.err.println("[TurboMC][RegionStorage] Failed to remove MCA region after LRF write: " + e.getMessage());
+                }
+            }
+            
         } catch (Exception e) {
             throw new IOException("Failed to write chunk " + pos + " to LRF", e);
         }
@@ -306,39 +340,30 @@ public class TurboRegionFileStorage extends RegionFileStorage {
     @Nullable
     private Path getRegionPath(ChunkPos pos) {
         try {
-            RegionFile regionFile = delegate.getRegionFile(pos);
-            if (regionFile != null) {
-                // FIXED: Use cached reflection for performance
-                try {
-                    if (REFLECTION_AVAILABLE && REGION_PATH_FIELD != null) {
-                        Path regionPath = (Path) REGION_PATH_FIELD.get(regionFile);
-                        
-                        // FIXED: In FULL_LRF mode, ensure we use .lrf extension
-                        if (useTurboFeatures) {
-                            TurboConfig config = TurboConfig.getInstance();
-                            if (shouldSaveAsLRF(config, regionPath)) {
-                                int regionX = pos.x >> 5;
-                                int regionZ = pos.z >> 5;
-                                return regionFolder.resolve(String.format("r.%d.%d.lrf", regionX, regionZ));
-                            }
-                        }
-                        
-                        int regionX = pos.x >> 5;
-                        int regionZ = pos.z >> 5;
-                        return regionFolder.resolve(String.format("r.%d.%d.mca", regionX, regionZ));
-                    }
-                } catch (Exception e) {
-                    if (verbose) {
-                        System.err.println("[TurboMC][RegionStorage] Error getting region path: " + e.getMessage());
-                    }
-                }
+            // Compute region coordinates directly from chunk position
+            int regionX = pos.x >> 5;
+            int regionZ = pos.z >> 5;
+
+            // Base MCA path (vanilla format)
+            Path mcaPath = regionFolder.resolve(String.format("r.%d.%d.mca", regionX, regionZ));
+
+            if (!useTurboFeatures) {
+                return mcaPath;
             }
+
+            // With Turbo features enabled, decide between MCA and LRF purely via config
+            TurboConfig config = TurboConfig.getInstance();
+            if (shouldSaveAsLRF(config, mcaPath)) {
+                return regionFolder.resolve(String.format("r.%d.%d.lrf", regionX, regionZ));
+            }
+
+            return mcaPath;
         } catch (Exception e) {
             if (verbose) {
-                System.err.println("[TurboMC][RegionStorage] Error getting region file: " + e.getMessage());
+                System.err.println("[TurboMC][RegionStorage] Error computing region path: " + e.getMessage());
             }
+            return null;
         }
-        return null;
     }
     
     /**

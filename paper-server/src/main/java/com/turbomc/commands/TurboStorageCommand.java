@@ -7,10 +7,14 @@ import com.turbomc.storage.MMapReadAheadEngine;
 import com.turbomc.storage.ChunkBatchLoader;
 import com.turbomc.storage.ChunkBatchSaver;
 import com.turbomc.storage.TurboRegionFileStorage;
+import com.turbomc.storage.converter.RegionConverter;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.List;
 import java.util.Collections;
+import java.lang.reflect.Field;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -35,6 +39,7 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
  * /turbo storage flush - Flush all pending operations
  * /turbo storage cleanup - Cleanup unused resources
  * /turbo storage reload - Reload storage configuration
+ * /turbo storage convert <world> <to-lrf|to-mca> - Convert region format
  * 
  * @author TurboMC
  * @version 1.0.0
@@ -58,7 +63,13 @@ public class TurboStorageCommand {
                 .then(Commands.literal("reload")
                     .executes(TurboStorageCommand::reloadStorage))
                 .then(Commands.literal("convert")
-                    .executes(TurboStorageCommand::convertToLRF))
+                    .then(Commands.argument("world", net.minecraft.commands.arguments.DimensionArgument.dimension())
+                        .then(Commands.literal("to-lrf")
+                            .executes(ctx -> convertWorld(ctx, RegionConverter.FormatType.LRF)))
+                        .then(Commands.literal("to-mca")
+                            .executes(ctx -> convertWorld(ctx, RegionConverter.FormatType.MCA)))
+                    )
+                )
                 .then(Commands.literal("info")
                     .executes(TurboStorageCommand::showInfo))
             )
@@ -134,7 +145,7 @@ public class TurboStorageCommand {
             // Get the region storage for overworld using reflection
             RegionFileStorage storage;
             try {
-                java.lang.reflect.Field storageField = overworld.getChunkSource().chunkMap.getClass().getDeclaredField("storage");
+                Field storageField = overworld.getChunkSource().chunkMap.getClass().getDeclaredField("storage");
                 storageField.setAccessible(true);
                 storage = (RegionFileStorage) storageField.get(overworld.getChunkSource().chunkMap);
             } catch (Exception e) {
@@ -170,7 +181,7 @@ public class TurboStorageCommand {
             for (ServerLevel level : server.getAllLevels()) {
                 RegionFileStorage storage;
                 try {
-                    java.lang.reflect.Field storageField = level.getChunkSource().chunkMap.getClass().getDeclaredField("storage");
+                    Field storageField = level.getChunkSource().chunkMap.getClass().getDeclaredField("storage");
                     storageField.setAccessible(true);
                     storage = (RegionFileStorage) storageField.get(level.getChunkSource().chunkMap);
                 } catch (Exception e) {
@@ -263,12 +274,8 @@ public class TurboStorageCommand {
             source.sendSuccess(() -> Component.literal("§eWorld Storage Status:"), false);
             
             for (ServerLevel level : server.getAllLevels()) {
-                RegionFileStorage storage;
-                try {
-                    java.lang.reflect.Field storageField = level.getChunkSource().chunkMap.getClass().getDeclaredField("storage");
-                    storageField.setAccessible(true);
-                    storage = (RegionFileStorage) storageField.get(level.getChunkSource().chunkMap);
-                } catch (Exception e) {
+                RegionFileStorage storage = getRegionStorage(level);
+                if (storage == null) {
                     source.sendFailure(Component.literal("§cError accessing storage for world: " + level.dimension().location()));
                     continue;
                 }
@@ -295,25 +302,70 @@ public class TurboStorageCommand {
         
         return 1;
     }
-    
-    private static int convertToLRF(CommandContext<CommandSourceStack> context) throws CommandSyntaxException {
-        CommandSourceStack source = context.getSource();
-        
-        source.sendSuccess(() -> Component.literal("§e[TurboMC] Starting MCA to LRF conversion..."), false);
-        
-        try {
-            java.nio.file.Path regionDir = java.nio.file.Paths.get("world/region");
-            com.turbomc.storage.converter.RegionConverter converter = new com.turbomc.storage.converter.RegionConverter(true);
-            
-            var result = converter.convertDirectory(regionDir, regionDir, com.turbomc.storage.converter.RegionConverter.FormatType.LRF);
-            
-            source.sendSuccess(() -> Component.literal("§a[TurboMC] Conversion completed: " + result.toString()), false);
-            source.sendSuccess(() -> Component.literal("§e[TurboMC] Check world/region directory for .lrf files"), false);
-            
+
+    private static RegionFileStorage getRegionStorage(ServerLevel level) {
+         try {
+            Field storageField = level.getChunkSource().chunkMap.getClass().getDeclaredField("storage");
+            storageField.setAccessible(true);
+            return (RegionFileStorage) storageField.get(level.getChunkSource().chunkMap);
         } catch (Exception e) {
-            source.sendFailure(Component.literal("§c[TurboMC] Conversion failed: " + e.getMessage()));
-            e.printStackTrace();
+            return null;
         }
+    }
+    
+    // New Helper for World Conversion
+    private static int convertWorld(CommandContext<CommandSourceStack> context, RegionConverter.FormatType targetFormat) throws CommandSyntaxException {
+        CommandSourceStack source = context.getSource();
+        ServerLevel level = net.minecraft.commands.arguments.DimensionArgument.getDimension(context, "world");
+        
+        source.sendSuccess(() -> Component.literal("§e[TurboMC] Starting conversion for world " + level.dimension().location() + " to " + targetFormat + "..."), true);
+        
+        // Run async to avoid blocking main thread
+        CompletableFuture.runAsync(() -> {
+            try {
+                // Access folder via reflection
+                RegionFileStorage storage = getRegionStorage(level);
+                if (storage == null) {
+                     source.sendFailure(Component.literal("§cCould not access storage to determine path."));
+                     return;
+                }
+
+                Path regionDir = null;
+                try {
+                    // RegionFileStorage has 'private final Path folder;'
+                    // We need to access it from RegionFileStorage class (parent of TurboRegionFileStorage/LRFRegionFileAdapter?)
+                    // Actually RegionFileStorage.java (line 296) 'this.folder = folder;'
+                    Class<?> clazz = storage.getClass();
+                    // Walk up to find RegionFileStorage if it's a wrapper
+                    while (clazz != null && clazz != RegionFileStorage.class) {
+                        clazz = clazz.getSuperclass();
+                    }
+                    if (clazz == null) clazz = RegionFileStorage.class; // fallback
+
+                    Field folderField = clazz.getDeclaredField("folder");
+                    folderField.setAccessible(true);
+                    regionDir = (Path) folderField.get(storage);
+                } catch (Exception e) {
+                    source.sendFailure(Component.literal("§cReflection error getting folder: " + e.getMessage()));
+                    return;
+                }
+                
+                if (!Files.exists(regionDir)) {
+                     source.sendFailure(Component.literal("§cRegion directory not found: " + regionDir));
+                     return;
+                }
+
+                RegionConverter converter = new RegionConverter(true);
+                var result = converter.convertDirectory(regionDir, regionDir, targetFormat);
+                
+                source.sendSuccess(() -> Component.literal("§a[TurboMC] Conversion completed for " + level.dimension().location() + ": " + result), true);
+                 source.sendSuccess(() -> Component.literal("§e[TurboMC] A restart is recommended to load new files."), true);
+
+            } catch (Exception e) {
+                source.sendFailure(Component.literal("§c[TurboMC] Conversion failed: " + e.getMessage()));
+                e.printStackTrace();
+            }
+        });
         
         return 1;
     }

@@ -16,6 +16,10 @@ import java.util.Map;
 /**
  * Hybrid 3-level chunk cache system for optimal performance.
  * 
+ * **EXPERIMENTAL FEATURE**: This cache system is not currently integrated into the main I/O pipeline.
+ * It is provided as a foundation for future advanced caching strategies but should NOT be used in production
+ * without explicit configuration and testing.
+ * 
  * Architecture:
  * L1: ChunkHotCache (RAM) - 256-512MB, LRU, active chunks
  * L2: ChunkWarmCache (mmap) - 1-2GB, disk-mapped, recent chunks  
@@ -30,7 +34,9 @@ import java.util.Map;
  * 
  * @author TurboMC
  * @version 1.0.0
+ * @deprecated Experimental - not integrated into main I/O pipeline
  */
+@Deprecated
 public class HybridChunkCache implements AutoCloseable {
     
     // Cache levels
@@ -97,9 +103,11 @@ public class HybridChunkCache implements AutoCloseable {
         
         startMaintenanceTasks();
         
-        System.out.println("[TurboMC] HybridChunkCache initialized: " + regionPath.getFileName() +
+        System.out.println("[TurboMC] HybridChunkCache initialized (EXPERIMENTAL): " + regionPath.getFileName() +
                          " (hot: " + (hotCacheMaxSize / 1024 / 1024) + "MB, " +
                          "warm: " + (warmCacheMaxSize / 1024 / 1024) + "MB)");
+        System.out.println("[TurboMC] WARNING: HybridChunkCache is experimental and not integrated into the main I/O pipeline.");
+        System.out.println("[TurboMC] This cache is provided as a foundation for future enhancements only.");
     }
     
     /**

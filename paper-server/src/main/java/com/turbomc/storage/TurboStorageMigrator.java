@@ -139,29 +139,35 @@ public final class TurboStorageMigrator {
      * Verify that conversion was successful by checking file counts.
      */
     private static void verifyConversion(Path regionDir, long expectedOriginalCount) throws IOException {
+        long lrfCount;
+        long mcaCount;
+
         try (Stream<Path> files = Files.list(regionDir)) {
-            long lrfCount = files
+            lrfCount = files
                 .filter(Files::isRegularFile)
                 .filter(file -> file.getFileName().toString().endsWith(".lrf"))
                 .count();
-            
-            long mcaCount = files
+        }
+
+        try (Stream<Path> files = Files.list(regionDir)) {
+            mcaCount = files
                 .filter(Files::isRegularFile)
                 .filter(file -> file.getFileName().toString().endsWith(".mca"))
                 .count();
-            
-            System.out.println("[TurboMC][LRF] Verification: " + lrfCount + " LRF files, " + 
-                             mcaCount + " remaining MCA files");
-            
-            if (lrfCount < expectedOriginalCount) {
-                System.err.println("[TurboMC][LRF] WARNING: Not all files were converted. " +
-                                 "Expected: " + expectedOriginalCount + ", Got: " + lrfCount);
-            }
-            
-            if (mcaCount > 0) {
-                System.out.println("[TurboMC][LRF] INFO: " + mcaCount + 
-                                 " MCA files remain (backup or conversion failed)");
-            }
+        }
+
+        System.out.println("[TurboMC][LRF] Verification: " + lrfCount + " LRF files, " + 
+                         mcaCount + " remaining MCA files");
+
+        if (lrfCount < expectedOriginalCount) {
+            System.err.println("[TurboMC][LRF] WARNING: Not all files were converted. " +
+                             "Expected: " + expectedOriginalCount + ", Got: " + lrfCount);
+        }
+
+        if (mcaCount > 0) {
+            System.err.println("[TurboMC][LRF] ERROR: MCA/LRF coexistence detected after FULL_LRF conversion. " +
+                             "Remaining MCA files: " + mcaCount);
+            throw new IOException("FULL_LRF conversion incomplete: " + mcaCount + " MCA files remain in " + regionDir);
         }
     }
 
@@ -202,14 +208,7 @@ public final class TurboStorageMigrator {
      * @throws IOException if conversion fails
      */
     private static void migrateOnDemand(Path regionDir, StorageFormat targetFormat) throws IOException {
-        System.out.println("[TurboMC][LRF] Starting ON-DEMAND conversion...");
-        
-        RegionConverter converter = new RegionConverter(true);
-        
-        // Convert in-place: source and target are the same directory
-        // This will convert files as they are encountered
-        converter.convertRegionDirectory(regionDir, regionDir, targetFormat);
-        
-        System.out.println("[TurboMC][LRF] ON-DEMAND conversion completed.");
+        System.out.println("[TurboMC][LRF] ON-DEMAND mode active: regions will be converted lazily as chunks are accessed.");
+        System.out.println("[TurboMC][LRF] Note: runtime per-chunk conversion is handled by storage hooks; no bulk conversion will be performed at startup.");
     }
 }
