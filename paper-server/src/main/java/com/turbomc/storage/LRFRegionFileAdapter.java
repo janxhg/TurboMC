@@ -173,7 +173,13 @@ public class LRFRegionFileAdapter extends RegionFile {
     private void writeChunk(ChunkPos chunkPos, byte[] nbtData) throws IOException {
         // Compress data
         // Uses primary compressor (LZ4 default or Zstd if configured)
-        byte[] compressedData = TurboCompressionService.getInstance().compress(nbtData);
+        byte[] compressedData;
+        try {
+            compressedData = TurboCompressionService.getInstance().compress(nbtData);
+        } catch (Exception e) {
+            System.err.println("[TurboMC] Compression failed in LRFRegionFileAdapter: " + e.getMessage());
+            compressedData = nbtData; // Fallback to uncompressed
+        }
         
         // Size calculation (payload + 8 bytes timestamp)
         int size = compressedData.length + 8;

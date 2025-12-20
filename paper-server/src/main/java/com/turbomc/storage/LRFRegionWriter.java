@@ -137,12 +137,18 @@ public class LRFRegionWriter implements AutoCloseable {
         byte[] dataToWrite = new byte[dataWithTimestamp.remaining()];
         dataWithTimestamp.get(dataToWrite);
         
-        // Compress if needed
+        // Compress if needed with error handling
         byte[] compressedData;
         if (compressionType == LRFConstants.COMPRESSION_NONE) {
             compressedData = dataToWrite;
         } else {
-            compressedData = TurboCompressionService.getInstance().compress(dataToWrite);
+            try {
+                compressedData = TurboCompressionService.getInstance().compress(dataToWrite);
+            } catch (com.turbomc.compression.CompressionException e) {
+                System.err.println("[TurboMC] Compression failed for chunk at " + chunk.getChunkX() + "," + chunk.getChunkZ() + ", using uncompressed data");
+                // Fallback to uncompressed data
+                compressedData = dataToWrite;
+            }
         }
         
         // Get current file position for offset
@@ -261,12 +267,18 @@ public class LRFRegionWriter implements AutoCloseable {
             byte[] dataToWrite = new byte[dataWithTimestamp.remaining()];
             dataWithTimestamp.get(dataToWrite);
             
-            // Compress if needed
+            // Compress if needed with error handling
             byte[] compressedData;
             if (compressionType == LRFConstants.COMPRESSION_NONE) {
                 compressedData = dataToWrite;
             } else {
-                compressedData = TurboCompressionService.getInstance().compress(dataToWrite);
+                try {
+                    compressedData = TurboCompressionService.getInstance().compress(dataToWrite);
+                } catch (com.turbomc.compression.CompressionException e) {
+                    System.err.println("[TurboMC] Compression failed for chunk at " + chunk.getChunkX() + "," + chunk.getChunkZ() + ", using uncompressed data");
+                    // Fallback to uncompressed data
+                    compressedData = dataToWrite;
+                }
             }
             
             // Write chunk data

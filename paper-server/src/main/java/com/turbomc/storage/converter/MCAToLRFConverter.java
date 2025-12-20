@@ -37,6 +37,10 @@ public class MCAToLRFConverter {
     // Streaming support
     private boolean streamingMode;
     
+    // Validation and recovery
+    private final ChunkDataValidator validator;
+    private final ConversionRecoveryManager recoveryManager;
+    
     /**
      * Create a new MCA to LRF converter.
      * 
@@ -54,6 +58,10 @@ public class MCAToLRFConverter {
         this.batchSize = LRFConstants.BATCH_SIZE;
         this.ioBuffer = ByteBuffer.allocate(LRFConstants.STREAM_BUFFER_SIZE);
         this.streamingMode = false;
+        
+        // Initialize validation and recovery
+        this.validator = new ChunkDataValidator();
+        this.recoveryManager = new ConversionRecoveryManager(true, true);
     }
     
     /**
@@ -114,10 +122,16 @@ public class MCAToLRFConverter {
         int chunksConverted = 0;
         long lrfSize = 0;
         
+        // Create backup of original file
+        Path backupPath = recoveryManager.createBackup(mcaPath);
+        
         try (AnvilRegionReader reader = new AnvilRegionReader(mcaPath);
              LRFRegionWriter writer = new LRFRegionWriter(lrfPath, compressionType)) {
             
             writer.enableStreaming();
+            
+            // Reset validation for new conversion
+            validator.reset();
             
             // Process chunks in batches
             List<LRFChunkEntry> batch = new ArrayList<>(batchSize);
@@ -127,20 +141,25 @@ public class MCAToLRFConverter {
                     if (reader.hasChunk(x, z)) {
                         LRFChunkEntry chunk = reader.readChunk(x, z);
                         if (chunk != null) {
-                            batch.add(chunk);
-                            
-                            // Process batch when full
-                            if (batch.size() >= batchSize) {
-                                for (LRFChunkEntry batchChunk : batch) {
-                                    writer.addChunk(batchChunk);
-                                }
-                                chunksConverted += batch.size();
-                                batch.clear();
+                            // Validate chunk before adding to batch
+                            if (validator.validateChunk(chunk)) {
+                                batch.add(chunk);
                                 
-                                // Progress indicator
-                                if (verbose && chunksConverted % 50 == 0) {
-                                    System.out.println("[TurboMC] Streaming progress: " + chunksConverted + " chunks");
+                                // Process batch when full
+                                if (batch.size() >= batchSize) {
+                                    for (LRFChunkEntry batchChunk : batch) {
+                                        writer.addChunk(batchChunk);
+                                    }
+                                    chunksConverted += batch.size();
+                                    batch.clear();
+                                    
+                                    // Progress indicator
+                                    if (verbose && chunksConverted % 50 == 0) {
+                                        System.out.println("[TurboMC] Streaming progress: " + chunksConverted + " chunks");
+                                    }
                                 }
+                            } else {
+                                System.err.println("[TurboMC] Skipping invalid chunk at " + x + "," + z);
                             }
                         }
                     }
@@ -155,6 +174,14 @@ public class MCAToLRFConverter {
             
             writer.flush();
             lrfSize = Files.size(lrfPath);
+        }
+        
+        // Validate conversion result
+        boolean conversionValid = recoveryManager.validateConversion(lrfPath, RegionConverter.FormatType.LRF);
+        if (!conversionValid) {
+            System.err.println("[TurboMC] Conversion validation failed, attempting recovery...");
+            recoveryManager.recoverFromFailure(lrfPath, mcaPath);
+            throw new IOException("Conversion validation failed for " + mcaPath.getFileName());
         }
         
         // Update statistics

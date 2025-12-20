@@ -270,7 +270,12 @@ public class ChunkBatchSaver implements AutoCloseable {
         if (compressionType == LRFConstants.COMPRESSION_NONE) {
             compressedData = dataToWrite;
         } else {
-            compressedData = TurboCompressionService.getInstance().compress(dataToWrite);
+            try {
+                compressedData = TurboCompressionService.getInstance().compress(dataToWrite);
+            } catch (Exception e) {
+                System.err.println("[TurboMC] Compression failed for chunk: " + e.getMessage());
+                compressedData = dataToWrite; // Fallback to uncompressed
+            }
         }
         
         return new CompressedChunk(chunk, compressedData);
