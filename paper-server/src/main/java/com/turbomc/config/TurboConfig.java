@@ -76,13 +76,13 @@ public class TurboConfig {
                 # This file controls server-specific optimizations and features unique to TurboMC
                 
                 [compression]
-                # Compression algorithm: "lz4" (faster) or "zlib" (vanilla compatible)
-                algorithm = "lz4"
+                # Compression algorithm: "zstd" (fastest/best), "lz4" (fast), or "zlib" (vanilla compatible)
+                algorithm = "zstd"
                 
                 # Compression level
-                # - For LZ4: 1-17 (higher = more compression, slower)
-                # - For Zlib: 1-9 (higher = more compression, slower)
-                level = 6
+                # - For Zstd: 1-22 (3 is standard, 1 is ultra-fast)
+                # - For LZ4: 1-17
+                level = 3
                 
                 # Automatically migrate old zlib-compressed data to LZ4 format
                 auto-migrate = true
@@ -109,13 +109,13 @@ public class TurboConfig {
                 enabled = true
                 
                 # Number of threads for batch loading operations
-                load-threads = 4
+                load-threads = 8
                 
                 # Number of threads for batch saving operations  
-                save-threads = 2
+                save-threads = 4
                 
                 # Maximum chunks per batch operation
-                batch-size = 32
+                batch-size = 64
                 
                 # Maximum concurrent loading operations
                 max-concurrent-loads = 64
@@ -126,16 +126,23 @@ public class TurboConfig {
                 enabled = true
                 
                 # Maximum cache size in number of chunks
-                max-cache-size = 512
+                max-cache-size = 1024
                 
                 # Prefetch distance in chunks from player position
-                prefetch-distance = 4
+                prefetch-distance = 8
                 
                 # Prefetch batch size
-                prefetch-batch-size = 16
+                prefetch-batch-size = 32
+                
+                # Predictive/Kinematic Prefetching
+                # Analyzes movement vectors to pre-load chunks in the direction of travel
+                predictive-enabled = true
+                
+                # Prediction strength (how many chunks ahead to look)
+                prediction-scale = 6
                 
                 # Maximum memory usage for caching (in MB)
-                max-memory-usage = 256
+                max-memory-usage = 512
                 
                 # Use Java 22+ Foreign Memory API if available
                 use-foreign-memory-api = true

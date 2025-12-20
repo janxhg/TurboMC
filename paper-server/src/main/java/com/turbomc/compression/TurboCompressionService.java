@@ -29,12 +29,15 @@ public class TurboCompressionService {
         this.fallbackEnabled = config.isFallbackEnabled();
         
         // Initialize primary compressor based on config
-        if ("lz4".equals(algorithm)) {
+        if ("zstd".equals(algorithm)) {
+            this.primaryCompressor = new ZstdCompressor(level);
+            this.fallbackCompressor = new ZlibCompressor(level); // Safer fallback than LZ4 for size
+        } else if ("lz4".equals(algorithm)) {
             this.primaryCompressor = new LZ4CompressorImpl(level);
             this.fallbackCompressor = new ZlibCompressor(level);
         } else {
             this.primaryCompressor = new ZlibCompressor(level);
-            this.fallbackCompressor = new LZ4CompressorImpl(level);
+            this.fallbackCompressor = new ZstdCompressor(Math.min(3, level)); // Try Zstd as fallback if available
         }
         
         System.out.println("[TurboMC] Compression initialized: " + primaryCompressor.getName() + 
@@ -131,7 +134,13 @@ public class TurboCompressionService {
         } else if (magicByte == fallbackCompressor.getMagicByte()) {
             return fallbackCompressor;
         } else {
-            // Unknown format, try primary compressor
+            // Check specific known magic bytes for safety if primary/fallback changes
+            // Zstd = 0x54 ('T'), LZ4 = 0x4C ('L'), Zlib = 0x78 ('x')
+            if (magicByte == 0x54) return new ZstdCompressor(3);
+            if (magicByte == 0x4C) return new LZ4CompressorImpl(3); 
+            if (magicByte == 0x78) return new ZlibCompressor(3);
+            
+            // Unknown format, try primary compressor as last resort
             System.out.println("[TurboMC] Unknown compression format (magic byte: 0x" + 
                              Integer.toHexString(magicByte & 0xFF) + "), using primary");
             return primaryCompressor;

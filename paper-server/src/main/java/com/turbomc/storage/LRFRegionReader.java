@@ -114,19 +114,44 @@ public class LRFRegionReader implements AutoCloseable {
         }
         
         // Zero-copy read from mmap
-        byte[] compressedData = new byte[size];
+        // Note: 'size' from header is the full sector aligned size
+        byte[] rawSectorData = new byte[size];
         
         // Duplicate buffer to allow thread-safe position changes
         ByteBuffer threadLocalBuffer = mappedBuffer.duplicate();
         threadLocalBuffer.position(offset);
-        threadLocalBuffer.get(compressedData);
+        threadLocalBuffer.get(rawSectorData);
+        
+        // Parse Length Header (First 4 bytes)
+        // LRF v1.1: [Length (4b)][Data...][Timestamp (8b)]
+        if (size < 4) return null;
+        
+        // Manual Int read to avoid ByteBuffer allocation
+        int exactLength = ((rawSectorData[0] & 0xFF) << 24) | 
+                          ((rawSectorData[1] & 0xFF) << 16) | 
+                          ((rawSectorData[2] & 0xFF) << 8) | 
+                          (rawSectorData[3] & 0xFF);
+                          
+        if (exactLength <= 0 || exactLength > size - 4) {
+             // If invalid, we cannot trust this chunk.
+             // This might happen if reading an old chunk format (v1.0)
+             // But treating it as v1.1 is safer than crashing Zstd.
+             return null; 
+        }
+        
+        if (exactLength < 8) return null; // Too small for timestamp
+        
+        // Payload is Data ONLY (excluding timestamp)
+        int payloadSize = exactLength - 8;
+        byte[] compressedPayload = new byte[payloadSize];
+        System.arraycopy(rawSectorData, 4, compressedPayload, 0, payloadSize); // Offset 4
         
         // Decompress if needed
         byte[] data;
         if (header.getCompressionType() == LRFConstants.COMPRESSION_NONE) {
-            data = compressedData;
+            data = compressedPayload;
         } else {
-            data = TurboCompressionService.getInstance().decompress(compressedData);
+            data = TurboCompressionService.getInstance().decompress(compressedPayload);
         }
         
         // Cache the result (with size limit simple check)
@@ -263,8 +288,10 @@ public class LRFRegionReader implements AutoCloseable {
     public void close() throws IOException {
         try {
             clearCache();
-            // Note: MappedByteBuffer relies on GC to unmap, or strict cleaner in Java 9+. 
-            // In modern Java, just dropping reference is common, but explicit close is better if safe.
+            // Critical Fix for Windows: Explicitly unmap the MappedByteBuffer
+            if (mappedBuffer != null && mappedBuffer.isDirect()) {
+                cleanBuffer(mappedBuffer);
+            }
         } finally {
             if (channel != null && channel.isOpen()) {
                 channel.close();
@@ -272,6 +299,46 @@ public class LRFRegionReader implements AutoCloseable {
             if (file != null) {
                 file.close();
             }
+        }
+    }
+
+    /**
+     * Unmaps a direct buffer using Java's Unsafe/Foreign API (depending on version).
+     * Necessary because MappedByteBuffer normally locks files on Windows until GC.
+     */
+    private void cleanBuffer(ByteBuffer buffer) {
+        if (buffer == null || !buffer.isDirect()) return;
+        
+        // Java 9+ approach using Unsafe for cleaning
+        try {
+            // This is a hack but standard practice in high-perf Java IO (Netty/Lucene style)
+            // Use reflection to access jdk.internal.ref.Cleaner or sun.misc.Unsafe
+            
+            // Try sun.misc.Unsafe invokeCleaner (Java 9+)
+            java.lang.reflect.Field unsafeField = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+            unsafeField.setAccessible(true);
+            sun.misc.Unsafe unsafe = (sun.misc.Unsafe) unsafeField.get(null);
+            
+            java.lang.reflect.Method invokeCleaner = sun.misc.Unsafe.class.getMethod("invokeCleaner", ByteBuffer.class);
+            invokeCleaner.invoke(unsafe, buffer);
+            
+        } catch (Exception e) {
+             // Fallback or ignore if not possible (e.g. SecurityManager)
+             // System.err.println("[TurboMC] Failed to unmap buffer: " + e.getMessage());
+             
+             // Java 8 fallback (DirectByteBuffer.cleaner().clean())
+             try {
+                 java.lang.reflect.Method cleanerMethod = buffer.getClass().getMethod("cleaner");
+                 cleanerMethod.setAccessible(true);
+                 Object cleaner = cleanerMethod.invoke(buffer);
+                 if (cleaner != null) {
+                     java.lang.reflect.Method cleanMethod = cleaner.getClass().getMethod("clean");
+                     cleanMethod.setAccessible(true);
+                     cleanMethod.invoke(cleaner);
+                 }
+             } catch (Exception e2) {
+                 // Nothing else we can do
+             }
         }
     }
 

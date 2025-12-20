@@ -77,15 +77,33 @@ public class LRFRegionFileAdapter extends RegionFile {
         ByteBuffer buffer = ByteBuffer.allocate(size);
         channel.read(buffer, offset);
         buffer.flip();
-        byte[] diskData = buffer.array();
+        byte[] bucket = buffer.array();
+        
+        // Read 4-byte length header
+        if (bucket.length < 4) return null;
+        int exactLength = ((bucket[0] & 0xFF) << 24) | ((bucket[1] & 0xFF) << 16) | ((bucket[2] & 0xFF) << 8) | (bucket[3] & 0xFF);
+        
+        // Validate length
+        if (exactLength <= 0 || exactLength > bucket.length - 4) {
+            String hexDump = "";
+            for (int i = 0; i < Math.min(bucket.length, 16); i++) {
+                hexDump += String.format("%02X ", bucket[i]);
+            }
+            System.err.println("[TurboMC][LRF] Critical Error reading chunk " + chunkX + "," + chunkZ + 
+                " at offset " + offset + " (Size: " + size + ")");
+            System.err.println("[TurboMC][LRF] Read Integer: " + exactLength);
+            System.err.println("[TurboMC][LRF] First 16 bytes: " + hexDump);
+            
+            throw new IOException("Invalid LRF chunk length header: " + exactLength + " (Sector size: " + bucket.length + ")");
+        }
 
         // LRF stores timestamp at end of chunk data (last 8 bytes)
         // We must strip this BEFORE decompression to assume payload is valid compressed block
-        if (diskData.length < 8) return null; // Should not happen if size is correct from header
-
-        int payloadSize = diskData.length - 8;
+        if (exactLength < 8) return null; 
+        
+        int payloadSize = exactLength - 8;
         byte[] payload = new byte[payloadSize];
-        System.arraycopy(diskData, 0, payload, 0, payloadSize);
+        System.arraycopy(bucket, 4, payload, 0, payloadSize); // Offset 4 to skip length header
 
         byte[] nbtData;
         if (header.getCompressionType() == LRFConstants.COMPRESSION_NONE) {
@@ -154,64 +172,73 @@ public class LRFRegionFileAdapter extends RegionFile {
     
     private void writeChunk(ChunkPos chunkPos, byte[] nbtData) throws IOException {
         // Compress data
-        // Uses primary compressor (LZ4 default) configured in TurboCompressionService
+        // Uses primary compressor (LZ4 default or Zstd if configured)
         byte[] compressedData = TurboCompressionService.getInstance().compress(nbtData);
         
-        // Add timestamp space (8 bytes)
-        ByteBuffer dataToWrite = ByteBuffer.allocate(compressedData.length + 8);
-        dataToWrite.put(compressedData);
-        dataToWrite.putLong(System.currentTimeMillis());
-        dataToWrite.flip();
-
-        int size = dataToWrite.remaining();
+        // Size calculation (payload + 8 bytes timestamp)
+        int size = compressedData.length + 8;
         int chunkX = chunkPos.x & 31;
         int chunkZ = chunkPos.z & 31;
+        int index = LRFConstants.getChunkIndex(chunkX, chunkZ);
 
         synchronized (fileLock) {
-            // Determine where to write
-            // Simple strategy: Always append to end
+            // Determine where to write - Append strategy
             long currentSize = channel.size();
             
-            // CRITICAL: LRF Header uses 256-byte units for offsets.
-            // We MUST align the write offset to 256 bytes.
+            // Align write offset to 256 bytes
             long writeOffset = (currentSize + 255) & ~255;
             long padding = writeOffset - currentSize;
             
-            // Advance channel to write position (handling padding via gap if we just seek?)
-            // No, channel.position(newPos) does NOT fill gap with zeroes automatically on some OS/FS?
-            // Usually it does (sparse files). But random bytes might appear? 
-            // Better write zeroes explicitly if padding is small.
             if (padding > 0) {
+                 // Zero-fill padding to prevent garbage data
+                 // Optimization: reuse a cached zero buffer if possible, or small alloc
+                 // For now, small alloc is fine for occasional padding
                  channel.position(currentSize);
                  channel.write(ByteBuffer.allocate((int)padding));
             }
-            channel.position(writeOffset); // Ensure we are at aligned offset
+            channel.position(writeOffset);
 
             // Zero-Copy Gathering Write
-            // 1. Data Buffer (Directly from compression service if possible, currently we have byte[])
+            // 1. Length Header (4 bytes)
+            // LRF format requires an internal length header because the sector map is coarse (4KB alignment).
+            // Length = CompressedData Size + Timestamp Size (8)
+            int dataLength = compressedData.length + 8;
+            ByteBuffer lenBuf = ByteBuffer.allocate(4);
+            lenBuf.putInt(dataLength);
+            lenBuf.flip();
+
+            // 2. Data Buffer
             ByteBuffer dataBuf = ByteBuffer.wrap(compressedData);
-            // 2. Timestamp Buffer (8 bytes)
+            
+            // 3. Timestamp Buffer
             ByteBuffer tsBuf = ByteBuffer.allocate(8);
             tsBuf.putLong(System.currentTimeMillis());
             tsBuf.flip();
             
-            // Write both buffers in one OS call
-            channel.write(new ByteBuffer[]{dataBuf, tsBuf});
+            // Write payload efficiently
+            channel.write(new ByteBuffer[]{lenBuf, dataBuf, tsBuf});
             
-            // Update header
-            // size is passed in bytes; header converts to 4KB sectors internally (rounding up)
-            header.setChunkData(chunkX, chunkZ, (int) writeOffset, size);
+            // Update in-memory header
+            // Total size on disk = 4 (len) + dataLength
+            int totalSize = 4 + dataLength;
+            header.setChunkData(chunkX, chunkZ, (int) writeOffset, totalSize);
             
-            // Write updated header to disk
-            ByteBuffer headerBuf = ByteBuffer.allocate(LRFConstants.HEADER_SIZE);
-            header.write(headerBuf);
-            headerBuf.flip();
-            channel.write(headerBuf, 0);
+            // Update On-Disk Header (Granular Write)
+            // LRF optimization: Only write the specific modified entry (4 bytes)
+            // instead of flushing the entire 8KB header.
             
-            // REMOVED: channel.force(false); 
-            // Performance Fix: Do NOT force disk sync on every chunk write. 
-            // Reliance on OS page cache is standard behavior for RegionFiles. 
-            // Sync happens on save-all / close.
+            int offsetSectors = (int) (writeOffset / 256);
+            int sizeSectors = (totalSize + 4095) / 4096;
+            int entryValue = (offsetSectors << 8) | (sizeSectors & 0xFF);
+            
+            ByteBuffer entryBuf = ByteBuffer.allocate(4);
+            entryBuf.putInt(entryValue);
+            entryBuf.flip();
+            
+            long entryPos = LRFConstants.OFFSETS_TABLE_OFFSET + (index * 4L);
+            channel.write(entryBuf, entryPos);
+            
+            // No force(true) - rely on OS page cache for performance
         }
     }
 

@@ -50,8 +50,10 @@ public class MMapReadAheadEngine implements AutoCloseable {
     private final int prefetchDistance;
     private final int prefetchBatchSize;
     private final long maxMemoryUsage;
+    private final boolean predictiveEnabled;
+    private final int predictionScale;
     private boolean useForeignMemoryAPI;
-    
+
     // Memory management
     private final AtomicLong currentMemoryUsage;
     private final AtomicInteger cacheHits;
@@ -67,38 +69,32 @@ public class MMapReadAheadEngine implements AutoCloseable {
     
     // Statistics
     private final long startTime;
-    
-    /**
-     * Create a new read-ahead engine with default configuration.
-     * 
-     * @param regionPath Path to the LRF region file
-     * @throws IOException if file cannot be opened
-     */
+
     public MMapReadAheadEngine(Path regionPath) throws IOException {
         this(regionPath, 
              512,  // max cache size (chunks)
-             4,    // prefetch distance (chunks)
-             16,   // prefetch batch size
-             256 * 1024 * 1024); // 256MB max memory
+             8,    // prefetch distance (chunks)
+             32,   // prefetch batch size
+             256 * 1024 * 1024, // 256MB max memory
+             true, // predictive enabled
+             6);   // prediction scale
     }
     
-    /**
-     * Create a new read-ahead engine with custom configuration.
-     * 
-     * @param regionPath Path to the LRF region file
-     * @param maxCacheSize Maximum number of chunks to cache
-     * @param prefetchDistance Distance in chunks to prefetch ahead
-     * @param prefetchBatchSize Number of chunks to prefetch in one batch
-     * @param maxMemoryUsage Maximum memory usage in bytes
-     * @throws IOException if file cannot be opened
-     */
     public MMapReadAheadEngine(Path regionPath, int maxCacheSize, int prefetchDistance,
                               int prefetchBatchSize, long maxMemoryUsage) throws IOException {
+        this(regionPath, maxCacheSize, prefetchDistance, prefetchBatchSize, maxMemoryUsage, true, 6);
+    }
+
+    public MMapReadAheadEngine(Path regionPath, int maxCacheSize, int prefetchDistance,
+                              int prefetchBatchSize, long maxMemoryUsage, 
+                              boolean predictiveEnabled, int predictionScale) throws IOException {
         this.regionPath = regionPath;
         this.maxCacheSize = maxCacheSize;
         this.prefetchDistance = prefetchDistance;
         this.prefetchBatchSize = prefetchBatchSize;
         this.maxMemoryUsage = maxMemoryUsage;
+        this.predictiveEnabled = predictiveEnabled;
+        this.predictionScale = predictionScale;
         
         // Detect if Foreign Memory API is available (Java 22+)
         this.useForeignMemoryAPI = detectForeignMemoryAPI();
@@ -129,9 +125,12 @@ public class MMapReadAheadEngine implements AutoCloseable {
         System.out.println("[TurboMC] MMapReadAheadEngine initialized: " + regionPath.getFileName() +
                          " (cache: " + maxCacheSize + " chunks, " +
                          "prefetch: " + prefetchDistance + " chunks, " +
+                         "predictive: " + predictiveEnabled + " (" + predictionScale + "), " +
                          "memory: " + (maxMemoryUsage / 1024 / 1024) + "MB, " +
                          "foreign-api: " + useForeignMemoryAPI + ")");
     }
+        
+
     
     /**
      * Initialize memory-mapped file access.
@@ -259,10 +258,15 @@ public class MMapReadAheadEngine implements AutoCloseable {
         return LRFHeader.read(ByteBuffer.wrap(headerData));
     }
     
+    // Proactive movement prediction fields
+    private final AtomicInteger lastAccessX = new AtomicInteger(Integer.MIN_VALUE);
+    private final AtomicInteger lastAccessZ = new AtomicInteger(Integer.MIN_VALUE);
+    
     /**
      * Cache a chunk with memory management.
      */
     private void cacheChunk(int chunkIndex, byte[] data) {
+        // ... (existing cache logic)
         // Check memory limits
         if (currentMemoryUsage.get() + data.length > maxMemoryUsage) {
             cleanupCache();
@@ -285,26 +289,64 @@ public class MMapReadAheadEngine implements AutoCloseable {
     
     /**
      * Trigger prefetch for chunks around the specified coordinates.
+     * Implements "Momentum-Aware" prefetching.
      */
     private void triggerPrefetch(int centerX, int centerZ) {
         if (isClosed.get()) {
             return;
         }
         
+        // Update vector calculation
+        int lastX = lastAccessX.getAndSet(centerX);
+        int lastZ = lastAccessZ.getAndSet(centerZ);
+        
+        int velX = 0;
+        int velZ = 0;
+        
+        // Calculate velocity if this isn't the first access and it's nearby (not teleport)
+        if (lastX != Integer.MIN_VALUE && Math.abs(centerX - lastX) <= 2 && Math.abs(centerZ - lastZ) <= 2) {
+             velX = centerX - lastX;
+             velZ = centerZ - lastZ;
+        }
+        
+        final int fVelX = velX;
+        final int fVelZ = velZ;
+        
         CompletableFuture.runAsync(() -> {
             List<int[]> chunksToPrefetch = new ArrayList<>();
             
-            // Collect chunks in prefetch distance
+            // 1. Standard "Spatial" Prefetch (Radius)
+            // (Reduced radius if moving fast to save bandwidth for vector?)
+            // Keeping standard radius for consistency.
             for (int dx = -prefetchDistance; dx <= prefetchDistance; dx++) {
+                // ... (rest of loop logic)
                 for (int dz = -prefetchDistance; dz <= prefetchDistance; dz++) {
                     if (dx == 0 && dz == 0) continue; // Skip current chunk
                     
                     int chunkX = centerX + dx;
                     int chunkZ = centerZ + dz;
+                    
+                    // 2. Vector Bias: If moving, prioritize chunks IN FRONT of movement
+                    // If fVel != 0, check if this chunk aligns with direction
+                    boolean isAhead = false;
+                    if (fVelX != 0 || fVelZ != 0) {
+                         // Dot product > 0 means "in front"
+                         int relX = dx;
+                         int relZ = dz;
+                         if (relX * fVelX + relZ * fVelZ > 0) {
+                             isAhead = true;
+                         }
+                    }
+                    
                     int chunkIndex = LRFConstants.getChunkIndex(chunkX, chunkZ);
                     
                     // Only prefetch if not already cached
                     if (!chunkCache.containsKey(chunkIndex)) {
+                        // If moving, skip chunks BEHIND us to save IO, unless very close
+                        if ((fVelX != 0 || fVelZ != 0) && !isAhead && Math.abs(dx) > 1 && Math.abs(dz) > 1) {
+                            continue;
+                        }
+                        
                         chunksToPrefetch.add(new int[]{chunkX, chunkZ});
                         
                         // Limit batch size
@@ -317,6 +359,18 @@ public class MMapReadAheadEngine implements AutoCloseable {
                 if (chunksToPrefetch.size() >= prefetchBatchSize) {
                     break;
                 }
+            }
+            
+            // 3. Extended Vector Prefetch (Look AHEAD further)
+            if (predictiveEnabled && (fVelX != 0 || fVelZ != 0)) {
+                 for (int k = prefetchDistance + 1; k <= prefetchDistance + predictionScale; k++) {
+                      int lookAheadX = centerX + (fVelX * k);
+                      int lookAheadZ = centerZ + (fVelZ * k);
+                      int idx = LRFConstants.getChunkIndex(lookAheadX, lookAheadZ);
+                      if (!chunkCache.containsKey(idx)) {
+                           chunksToPrefetch.add(new int[]{lookAheadX, lookAheadZ});
+                      }
+                 }
             }
             
             // Prefetch chunks
@@ -450,8 +504,8 @@ public class MMapReadAheadEngine implements AutoCloseable {
                 // Close memory mappings
                 // memorySession is disabled for compatibility
                 
-                if (mappedBuffer != null) {
-                    // MappedByteBuffer is cleaned up by GC
+                if (mappedBuffer != null && mappedBuffer.isDirect()) {
+                    cleanBuffer(mappedBuffer);
                 }
                 
                 if (fileChannel != null) {
@@ -540,6 +594,37 @@ public class MMapReadAheadEngine implements AutoCloseable {
             return String.format("ReadAheadStats{hits=%d, misses=%d, hitRate=%.1f%%, prefetches=%d, cache=%d, memory=%.1fMB, elapsed=%ds, foreignAPI=%s}",
                     cacheHits, cacheMisses, hitRate, prefetchCount, cacheSize, 
                     memoryUsage / 1024.0 / 1024.0, elapsedMs / 1000, usingForeignMemoryAPI);
+        }
+    }
+
+    /**
+     * Unmaps a direct buffer using Java's Unsafe/Foreign API (depending on version).
+     */
+    private void cleanBuffer(ByteBuffer buffer) {
+        if (buffer == null || !buffer.isDirect()) return;
+        
+        try {
+            // Java 9+ approach using Unsafe for cleaning
+            java.lang.reflect.Field unsafeField = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+            unsafeField.setAccessible(true);
+            sun.misc.Unsafe unsafe = (sun.misc.Unsafe) unsafeField.get(null);
+            
+            java.lang.reflect.Method invokeCleaner = sun.misc.Unsafe.class.getMethod("invokeCleaner", ByteBuffer.class);
+            invokeCleaner.invoke(unsafe, buffer);
+        } catch (Exception e) {
+             // Java 8 fallback
+             try {
+                 java.lang.reflect.Method cleanerMethod = buffer.getClass().getMethod("cleaner");
+                 cleanerMethod.setAccessible(true);
+                 Object cleaner = cleanerMethod.invoke(buffer);
+                 if (cleaner != null) {
+                     java.lang.reflect.Method cleanMethod = cleaner.getClass().getMethod("clean");
+                     cleanMethod.setAccessible(true);
+                     cleanMethod.invoke(cleaner);
+                 }
+             } catch (Exception e2) {
+                 // Nothing else we can do
+             }
         }
     }
 }

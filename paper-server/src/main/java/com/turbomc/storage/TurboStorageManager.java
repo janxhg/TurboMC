@@ -346,12 +346,15 @@ public class TurboStorageManager implements AutoCloseable {
         return readAheadEngines.computeIfAbsent(regionPath, path -> {
             try {
                 int maxCacheSize = config.getInt("storage.mmap.max-cache-size", 512);
-                int prefetchDistance = config.getInt("storage.mmap.prefetch-distance", 4);
-                int prefetchBatchSize = config.getInt("storage.mmap.prefetch-batch-size", 16);
+                int prefetchDistance = config.getInt("storage.mmap.prefetch-distance", 8);
+                int prefetchBatchSize = config.getInt("storage.mmap.prefetch-batch-size", 32);
                 long maxMemoryUsage = config.getLong("storage.mmap.max-memory-usage", 256) * 1024 * 1024; // MB to bytes
                 
+                boolean predictive = config.getBoolean("storage.mmap.predictive-enabled", true);
+                int predictionScale = config.getInt("storage.mmap.prediction-scale", 6);
+                
                 return new MMapReadAheadEngine(path, maxCacheSize, prefetchDistance, 
-                                             prefetchBatchSize, maxMemoryUsage);
+                                             prefetchBatchSize, maxMemoryUsage, predictive, predictionScale);
             } catch (IOException e) {
                 System.err.println("[TurboMC][Storage] Failed to create MMap engine for " + path + ": " + e.getMessage());
                 return null;

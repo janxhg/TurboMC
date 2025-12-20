@@ -25,6 +25,7 @@ dependencies {
     
     // TurboMC - Compression & Config (v1.2.0)
     implementation("org.lz4:lz4-java:1.8.0")
+    implementation("com.github.luben:zstd-jni:1.5.5-11")
     implementation("com.moandjiezana.toml:toml4j:0.7.2")
     
     // TurboMC - YAML Support for paper-global.yml fallback (v1.3.0)
