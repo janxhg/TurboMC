@@ -282,7 +282,7 @@ public class TurboStorageManager implements AutoCloseable {
                             results.add(chunk);
                         }
                     } catch (Exception e) {
-                        LOGGER.warn("Failed to load chunk during batch operation", e);
+                        LOGGER.log(java.util.logging.Level.WARNING, "Failed to load chunk during batch operation", e);
                         // Skip failed chunks but continue with others
                     }
                 }
