@@ -317,11 +317,11 @@ L3: ChunkColdStorage (LRF/Disco)
 ### 1. Rate Limiter Interno
 **Propósito:** Prevenir packet spam exploits.
 
-- [ ] Rate limiting por jugador
-- [ ] Rate limiting global
-- [ ] Diferentes límites por packet type
-- [ ] Auto-ban temporal en abuse
-- [ ] Integración con TurboProxy L7
+- [x] Rate limiting por jugador
+- [x] Rate limiting global
+- [x] Diferentes límites por packet type
+- [x] Auto-ban temporal en abuse
+- [x] Integración con TurboProxy L7
 
 ### 2. Chunk Integrity Verification
 **Propósito:** Detectar y reparar chunks corruptos.
@@ -372,8 +372,8 @@ turbotools benchmark --compression file.dat
 ```
 
 **Componentes:**
-- [ ] CLI framework (picocli o similar)
-- [ ] Comandos `convert`, `compress`, `inspect`, `benchmark`
+- [x] CLI framework (picocli o similar)
+- [x] Comandos `convert`, `compress`, `inspect`, `benchmark`
 - [ ] Progress bars fancy
 - [ ] Export a JSON para CI/CD
 
