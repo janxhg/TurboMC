@@ -275,23 +275,23 @@ L3: ChunkColdStorage (LRF/Disco)
   └─ Tick en batch, cache-friendly
 ```
 
-- [ ] Agrupación automática por tipo de entidad
-- [ ] Tick batch con SIMD donde sea posible
-- [ ] Grupos dinámicos según carga
+- [x] Agrupación automática por tipo de entidad
+- [x] Tick batch con SIMD donde sea posible
+- [x] Grupos dinámicos según carga
 
 ### 6. Redstone Graph Engine
 **Propósito:** Optimizar circuitos complejos.
 
-- [ ] Convertir redstone a DAG (Directed Acyclic Graph)
-- [ ] Cálculo lazy (solo cuando cambia un nodo)
-- [ ] Detección de loops infinitos
-- [ ] 80%+ reducción de CPU en circuitos grandes
+- [x] Convertir redstone a DAG (Directed Acyclic Graph)
+- [x] Cálculo lazy (solo cuando cambia un nodo)
+- [x] Detección de loops infinitos
+- [x] 80%+ reducción de CPU en circuitos grandes
 
 ### 7. Light Engine 2.0 with SIMD
-- [ ] Propagación de luz en bloques 8×8×8 vectorizados
-- [ ] Cache de secciones de luz
-- [ ] Lazy recalculation
-- [ ] Prioridad por cercanía a jugadores
+- [x] Propagación de luz en bloques 8×8×8 vectorizados
+- [x] Cache de secciones de luz
+- [x] Lazy recalculation
+- [x] Prioridad por cercanía a jugadores
 
 ---
 
@@ -326,21 +326,21 @@ L3: ChunkColdStorage (LRF/Disco)
 ### 2. Chunk Integrity Verification
 **Propósito:** Detectar y reparar chunks corruptos.
 
-- [ ] Checksum LZ4 por chunk
-- [ ] Hash incremental de región
-- [ ] Auto-recuperación desde backup
-- [ ] Logging de corruption events
-- [ ] `/turbo verify region <x> <z>`
+- [x] Checksum LZ4 por chunk
+- [x] Hash incremental de región
+- [x] Auto-recuperación desde backup
+- [x] Logging de corruption events
+- [x] `/turbo verify region <x> <z>`
 
 ---
 
 ## 🟠 Advanced Security
 
 ### 3. Anti-Corruption System
-- [ ] Watchdog de writes corruptos
-- [ ] Validación de NBT structure
-- [ ] Quarantine de chunks sospechosos
-- [ ] Rollback automático
+- [x] Watchdog de writes corruptos
+- [x] Validación de NBT structure
+- [x] Quarantine de chunks sospechosos
+- [x] Rollback automático
 
 ---
 
