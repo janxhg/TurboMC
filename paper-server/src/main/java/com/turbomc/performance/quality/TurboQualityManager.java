@@ -18,14 +18,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  * - Entity culling optimization
  * - Particle effect optimization
  * - Quality presets (Low/Medium/High/Ultra)
- * - Performance-based quality scaling
  * 
  * @author TurboMC
  * @version 1.0.0
  */
 public class TurboQualityManager {
     
-    private static volatile TurboQualityManager instance;
+    static volatile TurboQualityManager instance;
     private static final Object INSTANCE_LOCK = new Object();
     
     // Quality presets
@@ -355,5 +354,12 @@ public class TurboQualityManager {
             return String.format("QualityStats{preset=%s, adjustments=%d, worlds=%d, tps=%d, auto=%s}",
                 currentPreset.getName(), totalAdjustments, trackedWorlds, currentTps, autoQualityEnabled);
         }
+    }
+    
+    /**
+     * Shutdown the quality manager.
+     */
+    public void close() {
+        System.out.println("[TurboMC][Quality] Quality Manager shutdown complete.");
     }
 }

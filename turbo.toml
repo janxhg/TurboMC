@@ -2,13 +2,13 @@
 # This file controls server-specific optimizations and features unique to TurboMC
 
 [compression]
-# Compression algorithm: "lz4" (faster) or "zlib" (vanilla compatible)
+# Compression algorithm: "zstd" (fastest/best), "lz4" (fast), or "zlib" (vanilla compatible)
 algorithm = "lz4"
 
 # Compression level
-# - For LZ4: 1-17 (higher = more compression, slower)
-# - For Zlib: 1-9 (higher = more compression, slower)
-level = 6
+# - For Zstd: 1-22 (3 is standard, 1 is ultra-fast)
+# - For LZ4: 1-17
+level = 17
 
 # Automatically migrate old zlib-compressed data to LZ4 format
 auto-migrate = true
@@ -18,50 +18,60 @@ fallback-enabled = true
 
 [storage]
 # Region file format: "auto" (detect), "lrf" (optimized), or "mca" (vanilla)
-format = "mca"
+format = "lrf"
 
 # Automatically convert MCA to LRF when loading chunks
-auto-convert = false
+auto-convert = true
 
-# Conversion mode: "on-demand" (convert as chunks load), "background" (idle time), or "manual"
-conversion-mode = "manual"
+# Conversion mode: "on-demand" (convert as chunks load), "background" (idle time), "full-lrf" (convert all at startup), or "manual"
+conversion-mode = "full-lrf"
+
+# Backup original MCA files before deletion
+backup-original-mca = false
 
 # Batch operations configuration
 [storage.batch]
 # Enable batch chunk loading/saving
-enabled = false
+enabled = true
 
 # Number of threads for batch loading operations
-load-threads = 1
+load-threads = 4
 
-# Number of threads for batch saving operations  
-save-threads = 1
+# Number of threads for batch saving operations
+save-threads = 4
 
 # Maximum chunks per batch operation
-batch-size = 1
+batch-size = 64
 
 # Maximum concurrent loading operations
-max-concurrent-loads = 1
+max-concurrent-loads = 32
 
 # Memory-mapped read-ahead engine
 [storage.mmap]
 # Enable memory-mapped read-ahead for SSD/NVMe optimization
-enabled = false
+enabled = true
 
 # Maximum cache size in number of chunks
-max-cache-size = 512
+max-cache-size = 1024
 
 # Prefetch distance in chunks from player position
-prefetch-distance = 4
+prefetch-distance = 8
 
 # Prefetch batch size
-prefetch-batch-size = 16
+prefetch-batch-size = 32
+
+# Predictive/Kinematic Prefetching
+# Analyzes movement vectors to pre-load chunks in the direction of travel
+predictive-enabled = true
+
+# Prediction strength (how many chunks ahead to look)
+prediction-scale = 6
 
 # Maximum memory usage for caching (in MB)
-max-memory-usage = 256
+max-memory-usage = 512
 
 # Use Java 22+ Foreign Memory API if available
-use-foreign-memory-api = true
+use-foreign-memory-api = false
 
 # Integrity validation system
 [storage.integrity]
@@ -82,6 +92,94 @@ validation-threads = 2
 
 # Validation interval in milliseconds (5 minutes)
 validation-interval = 300000
+
+[quality]
+# Quality and rendering optimizations
+# Target TPS for quality adjustments
+tps-threshold = 18.0
+
+# Memory usage threshold for quality adjustments (0.8 = 80%)
+memory-threshold = 0.8
+
+# Adjustment interval in server ticks (1200 = 1 minute)
+adjustment-interval-ticks = 1200
+
+# Default quality preset: LOW, MEDIUM, HIGH, ULTRA, DYNAMIC
+default-preset = "HIGH"
+
+    [quality.auto-adjust]
+    # Enable automatic quality adjustments based on performance
+    enabled = true
+
+    [quality.entity-culling]
+    # Entity culling optimization
+    enabled = true
+
+    [quality.particle-optimization]
+    # Particle effect optimization
+    enabled = true
+
+[fps]
+# FPS optimization settings
+# Target TPS for optimization
+target-tps = 20.0
+
+# TPS tolerance for optimization adjustments (±0.5 TPS)
+tps-tolerance = 0.5
+
+# Optimization check interval in ticks (100 = 5 seconds)
+optimization-interval-ticks = 100
+
+# Default optimization mode: CONSERVATIVE, BALANCED, PERFORMANCE, EXTREME, ADAPTIVE
+default-mode = "BALANCED"
+
+    [fps.redstone-optimization]
+    # Redstone optimization
+    enabled = true
+
+    [fps.entity-optimization]
+    # Entity activation range optimization
+    enabled = true
+
+    [fps.hopper-optimization]
+    # Hopper optimization
+    enabled = true
+
+    [fps.mob-spawning-optimization]
+    # Mob spawning optimization
+    enabled = true
+
+    [fps.chunk-ticking-optimization]
+    # Chunk ticking optimization
+    enabled = true
+
+[chunk]
+# Chunk loading optimization settings
+
+# Maximum memory usage for chunk caching (in MB)
+max-memory-usage-mb = 512
+
+# Memory threshold for cache cleanup (0.8 = 80%)
+memory-threshold = 0.8
+
+# Default loading strategy: CONSERVATIVE, BALANCED, AGGRESSIVE, EXTREME, ADAPTIVE
+default-strategy = "BALANCED"
+
+    [chunk.preloading]
+    # Enable intelligent chunk preloading
+    enabled = true
+
+    [chunk.parallel-generation]
+    # Enable parallel chunk generation
+    enabled = true
+
+    [chunk.caching]
+    # Enable chunk caching
+    enabled = true
+
+    [chunk.priority-loading]
+    # Enable priority-based loading
+    enabled = true
 
 [version-control]
 # Minimum Minecraft version allowed to connect (e.g., "1.20.1")

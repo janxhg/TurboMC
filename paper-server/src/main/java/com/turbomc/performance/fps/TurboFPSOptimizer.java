@@ -37,6 +37,8 @@ public class TurboFPSOptimizer implements TurboOptimizerModule {
     private double targetTPS;
     private double tpsTolerance;
     private boolean autoOptimization;
+    private int optimizationIntervalTicks;
+    private PerformanceLevel defaultMode;
     
     // Performance monitoring
     private final AtomicLong totalOptimizations = new AtomicLong(0);
@@ -146,6 +148,8 @@ public class TurboFPSOptimizer implements TurboOptimizerModule {
             targetTPS = 20.0;
             tpsTolerance = 1.0;
             autoOptimization = true;
+            optimizationIntervalTicks = 100; // 5 seconds default
+            defaultMode = PerformanceLevel.HIGH;
             return;
         }
         
@@ -153,6 +157,15 @@ public class TurboFPSOptimizer implements TurboOptimizerModule {
         targetTPS = config.getDouble("performance.target-tps", 20.0);
         tpsTolerance = config.getDouble("performance.tps-tolerance", 1.0);
         autoOptimization = config.getBoolean("performance.auto-optimization", true);
+        optimizationIntervalTicks = config.getInt("fps.optimization-interval-ticks", 100);
+        
+        String modeName = config.getString("fps.default-mode", "HIGH");
+        try {
+            defaultMode = PerformanceLevel.valueOf(modeName.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            defaultMode = PerformanceLevel.HIGH;
+            System.out.println("[TurboMC][FPS] Invalid default mode: " + modeName + ", using HIGH");
+        }
     }
     
     /**
@@ -179,11 +192,15 @@ public class TurboFPSOptimizer implements TurboOptimizerModule {
         // Monitor TPS every second
         scheduler.scheduleAtFixedRate(this::monitorTPS, 1, 1, TimeUnit.SECONDS);
         
-        // Run optimization every 5 seconds
-        scheduler.scheduleAtFixedRate(this::performOptimization, 5, 5, TimeUnit.SECONDS);
+        // Run optimization at configured interval
+        long intervalSeconds = optimizationIntervalTicks / 20L; // Convert ticks to seconds
+        scheduler.scheduleAtFixedRate(this::performOptimization, intervalSeconds, intervalSeconds, TimeUnit.SECONDS);
         
         // Cleanup metrics every minute
         scheduler.scheduleAtFixedRate(this::cleanupMetrics, 60, 60, TimeUnit.SECONDS);
+        
+        System.out.println("[TurboMC][FPS] FPS Optimizer started with interval: " + optimizationIntervalTicks + " ticks");
+        System.out.println("[TurboMC][FPS] Default performance mode: " + defaultMode.getName());
     }
     
     @Override
@@ -314,12 +331,27 @@ public class TurboFPSOptimizer implements TurboOptimizerModule {
      * Determine optimal performance level based on current TPS
      */
     private PerformanceLevel determineOptimalPerformanceLevel(int currentTPS) {
+        // Use default mode as baseline, adjust based on performance
+        PerformanceLevel baseline = defaultMode;
         double tpsRatio = (double) currentTPS / targetTPS;
         
-        if (tpsRatio >= 0.95) return PerformanceLevel.ULTRA;
-        if (tpsRatio >= 0.85) return PerformanceLevel.HIGH;
-        if (tpsRatio >= 0.70) return PerformanceLevel.MEDIUM;
-        if (tpsRatio >= 0.50) return PerformanceLevel.LOW;
+        // If performance is good, use default or upgrade
+        if (tpsRatio >= 0.95) {
+            return PerformanceLevel.ULTRA; // Best performance
+        }
+        
+        // If performance is decent, use default mode
+        if (tpsRatio >= 0.85) {
+            return baseline;
+        }
+        
+        // Performance degraded - downgrade from default
+        if (baseline == PerformanceLevel.ULTRA && tpsRatio >= 0.70) return PerformanceLevel.HIGH;
+        if (baseline == PerformanceLevel.HIGH && tpsRatio >= 0.70) return PerformanceLevel.MEDIUM;
+        if (baseline == PerformanceLevel.MEDIUM && tpsRatio >= 0.50) return PerformanceLevel.LOW;
+        if (baseline == PerformanceLevel.LOW && tpsRatio >= 0.50) return PerformanceLevel.MINIMAL;
+        
+        // Very poor performance
         return PerformanceLevel.MINIMAL;
     }
     

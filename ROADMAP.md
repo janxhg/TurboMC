@@ -74,7 +74,7 @@ byte[] decompressed = TurboCompressionService.decompress(compressed);
 **Componentes:**
 - [x] `LRFRegionWriter` - Escritor del nuevo formato ✅ v1.3.0
 - [x] `AnvilRegionReader` - Lector de formato MCA vanilla ✅ v1.3.0
-- [ ] CLI: `java -jar TurboTools.jar convert world/region --to-lrf`
+- [x] CLI: `java -jar TurboTools.jar convert world/region --to-lrf`
 - [x] Auto-migración opcional al inicio del servidor ✅ v1.3.0 (configuración agregada)
 - [x] Progress tracking y logging ✅ v1.3.0
 
@@ -99,7 +99,7 @@ Chunks (sequential, no padding)
 
 - [x] Implementar `LRFRegionReader` ✅ v1.3.0
 - [x] Implementar `AnvilRegionWriter` ✅ v1.3.0
-- [ ] CLI: `java -jar TurboTools.jar convert world/region --to-mca` v1.4.0
+- [x] CLI: `java -jar TurboTools.jar convert world/region --to-mca` v1.4.0
 - [x] Validación de integridad durante conversión ✅ v1.3.0
 
 
@@ -237,13 +237,13 @@ L3: ChunkColdStorage (LRF/Disco)
 - [x] SIMD bounding box intersection (8 entidades paralelas) ✅ v1.1.0
 - [x] Vectorización de distance checks ✅ v1.1.0
 - [x] Batch collision detection ✅ v1.1.0
-- [ ] Soporte AVX-512 en CPUs compatibles (funciona con AVX2 actualmente)
+- [x] Soporte AVX-512 en CPUs compatibles v1.7.0
 
 ### 2. Network IO Thread Pool
 **Propósito:** Descargar compresión/descompresión del main thread.
 
-- [ ] Thread pool dedicado para network IO
-- [ ] Compresión LZ4 en paralelo
+- [x] Thread pool dedicado para network IO
+- [x] Compresión LZ4 en paralelo
 - [ ] Descompresión asíncrona de packets
 - [ ] Queue non-blocking para main thread
 
