@@ -1,35 +1,55 @@
 # TurboMC 🚀
 
-**Versión 1.5.0** | [Changelog](./versions.md) | [Documentación](TURBO_FEATURES.md) | [Roadmap](./ROADMAP.md)
+**Versión 1.6.0**  
+Fork avanzado de **PaperMC 1.21.10** optimizado para **alto rendimiento**, **almacenamiento moderno** y **servidores exigentes**.
 
-TurboMC es un fork de alto rendimiento de PaperMC optimizado para servidores con alta densidad de entidades, jugadores y configuraciones proxy.
+[Changelog](./versions.md) · [Features](./TURBO_FEATURES.md)
 
-## 🚀 Características Principales
+---
 
-### 🌟 Linear Region Format (LRF) v1.5
-- **Almacenamiento optimizado** para SSD/NVMe
-- **Conversión MCA a LRF** con compresión LZ4
-- **Modo Full LRF** para generación directa de chunks
-- **Sistema de comandos** con `/turbo storage convert`
-- **Estadísticas detalladas** de conversión
+## 🔥 ¿Qué es TurboMC?
 
-### ⚡ Rendimiento Mejorado
-- **Conversión rápida**: 1675 chunks en 4.61 segundos
-- **Compresión eficiente**: Hasta 47.8% de ahorro de espacio
-- **Gestión de memoria** optimizada (256MB Cache Limitado)
-- **Zero-Lag IO**: Removed IO starvation (channel.force removed)
-- **Estabilidad**: Fixed Invalid Magic Byte crashes (Alignment checked)
-- **Manejo mejorado** de errores y logging
+TurboMC reemplaza el almacenamiento tradicional MCA por **LRF (Linear Region Format)**, incorpora **SIMD**, **I/O moderno**, **cache inteligente** y **gestión dinámica de calidad**, manteniendo compatibilidad total con plugins.
 
-### 🔄 Modos de Operación
-- **Modo Manual**: Conversión de archivos MCA existentes
-- **Full LRF**: Generación nativa de chunks (recomendado para nuevos mundos)
-  - Sin conversión MCA/LRF
-  - Carga más rápida de chunks
-  - Sin sobrecarga de conversión
+---
 
-## 📋 Requisitos
-- **Java 21+** (requerido)
-- **Flag de inicio obligatorio**:
-  ```bash
-  --add-modules=jdk.incubator.vector
+## 🧱 Almacenamiento LRF
+- Generación nativa de chunks (FULL_LRF)
+- Conversión MCA ↔ LRF
+- Compresión LZ4 / ZSTD
+- Reparación automática de corrupción
+- Ahorro de hasta ~50% de espacio
+- Ideal para SSD / NVMe
+
+---
+
+## ⚡ Rendimiento Extremo
+- SIMD Collision Engine (Vector API)
+- Carga paralela de chunks
+- Batch I/O + mmap
+- Zero IO lag
+- Cache híbrida RAM + disco
+
+---
+
+## 🧠 Calidad Dinámica
+- Ajuste automático según carga
+- Entity culling
+- Optimización de partículas
+- Presets configurables
+
+---
+
+## 🔒 Seguridad & Red
+- Anti-flood
+- Handshake seguro
+- Soporte Proxy / BungeeCord
+- Networking thread-safe
+
+---
+
+## 🛠 Requisitos
+- Java 21+
+- Flag obligatorio:
+```bash
+--add-modules=jdk.incubator.vector

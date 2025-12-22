@@ -1,16 +1,20 @@
 package com.turbomc.commands;
 
-import com.turbomc.storage.LRFCorruptionFixer;
-import com.turbomc.storage.LRFConstants;
+import com.turbomc.storage.lrf.LRFCorruptionFixer;
+import com.turbomc.storage.lrf.LRFConstants;
 import com.turbomc.compression.CompressionLevelValidator;
 
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
+import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
+import java.util.List;
+import java.util.ArrayList;
 
 /**
  * Command to repair corrupted LRF files and manage compression settings.
@@ -24,7 +28,7 @@ import java.nio.file.Paths;
  * @author TurboMC
  * @version 1.0.0
  */
-public class LRFRepairCommand implements CommandExecutor {
+public class LRFRepairCommand implements CommandExecutor, TabCompleter {
     
     private final LRFCorruptionFixer corruptionFixer;
     
@@ -295,5 +299,80 @@ public class LRFRepairCommand implements CommandExecutor {
         sender.sendMessage("§8  fast      - Fast conversion (LZ4 level 3)");
         sender.sendMessage("§8  max       - Maximum safe compression (ZSTD level 15)");
         sender.sendMessage("§8  development - Fastest for development (LZ4 level 1)");
+    }
+    
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        List<String> completions = new ArrayList<>();
+        
+        if (!sender.hasPermission("turbomc.admin")) {
+            return Arrays.asList(); // No suggestions for non-admins
+        }
+        
+        if (args.length == 1) {
+            // First argument: main commands
+            List<String> commands = Arrays.asList("scan", "repair", "status", "compress", "help");
+            String input = args[0].toLowerCase();
+            
+            for (String cmd : commands) {
+                if (cmd.toLowerCase().startsWith(input)) {
+                    completions.add(cmd);
+                }
+            }
+        } else if (args.length == 2) {
+            // Second argument: world names or compression types
+            String firstArg = args[0].toLowerCase();
+            String input = args[1].toLowerCase();
+            
+            if (firstArg.equals("compress")) {
+                // Compression types
+                List<String> types = Arrays.asList("safe", "fast", "max", "development");
+                for (String type : types) {
+                    if (type.toLowerCase().startsWith(input)) {
+                        completions.add(type);
+                    }
+                }
+            } else if (firstArg.equals("scan") || firstArg.equals("repair") || firstArg.equals("status")) {
+                // World names - try to get available worlds
+                try {
+                    java.io.File serverDir = new java.io.File(".");
+                    java.io.File worldDir = new java.io.File(serverDir, "world");
+                    if (worldDir.exists() && worldDir.isDirectory()) {
+                        java.io.File[] worlds = serverDir.listFiles((dir, name) -> 
+                            dir.isDirectory() && !name.equals(".") && !name.equals("..") && 
+                            (name.startsWith("world") || name.startsWith("DIM")));
+                        
+                        if (worlds != null) {
+                            for (java.io.File world : worlds) {
+                                String worldName = world.getName();
+                                if (worldName.toLowerCase().startsWith(input)) {
+                                    completions.add(worldName);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Add common world names if no worlds found
+                    if (completions.isEmpty()) {
+                        List<String> commonWorlds = Arrays.asList("world", "world_nether", "world_the_end");
+                        for (String world : commonWorlds) {
+                            if (world.toLowerCase().startsWith(input)) {
+                                completions.add(world);
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    // Fallback to common world names
+                    List<String> commonWorlds = Arrays.asList("world", "world_nether", "world_the_end");
+                    for (String world : commonWorlds) {
+                        if (world.toLowerCase().startsWith(input)) {
+                            completions.add(world);
+                        }
+                    }
+                }
+            }
+        }
+        
+        return completions;
     }
 }

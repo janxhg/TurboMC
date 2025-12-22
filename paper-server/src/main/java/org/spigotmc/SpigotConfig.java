@@ -74,7 +74,7 @@ public class SpigotConfig {
         
         // Initialize TurboMC LRF system
         try {
-            com.turbomc.storage.TurboLRFBootstrap.initialize();
+            com.turbomc.storage.optimization.TurboLRFBootstrap.initialize();
         } catch (Exception e) {
             System.err.println("[TurboMC] Failed to initialize LRF system: " + e.getMessage());
             e.printStackTrace();

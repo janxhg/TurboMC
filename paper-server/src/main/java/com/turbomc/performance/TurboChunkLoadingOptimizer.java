@@ -2,7 +2,8 @@ package com.turbomc.performance;
 
 import com.turbomc.config.TurboConfig;
 import com.turbomc.storage.TurboStorageManager;
-import com.turbomc.storage.ChunkBatchLoader;
+import com.turbomc.storage.batch.ChunkBatchLoader;
+import com.turbomc.storage.cache.HybridChunkCache;
 
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;

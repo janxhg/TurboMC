@@ -1,7 +1,7 @@
 package com.turbomc.storage.converter;
 
-import com.turbomc.storage.LRFConstants;
-import com.turbomc.storage.StorageFormat;
+import com.turbomc.storage.lrf.LRFConstants;
+import com.turbomc.storage.converter.StorageFormat;
 
 import java.io.IOException;
 import java.nio.file.Files;

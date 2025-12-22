@@ -2,10 +2,10 @@ package com.turbomc.commands;
 
 import com.turbomc.storage.TurboStorageManager;
 import com.turbomc.storage.TurboStorageHooks;
-import com.turbomc.storage.ChunkIntegrityValidator;
-import com.turbomc.storage.MMapReadAheadEngine;
-import com.turbomc.storage.ChunkBatchLoader;
-import com.turbomc.storage.ChunkBatchSaver;
+import com.turbomc.storage.integrity.ChunkIntegrityValidator;
+import com.turbomc.storage.mmap.MMapReadAheadEngine;
+import com.turbomc.storage.batch.ChunkBatchLoader;
+import com.turbomc.storage.batch.ChunkBatchSaver;
 import com.turbomc.storage.TurboRegionFileStorage;
 import com.turbomc.storage.converter.RegionConverter;
 
@@ -246,7 +246,7 @@ public class TurboStorageCommand {
             TurboStorageHooks.cleanupAll();
             
             // Reinitialize
-            com.turbomc.storage.TurboLRFBootstrap.initialize();
+            com.turbomc.storage.optimization.TurboLRFBootstrap.initialize();
             
             source.sendSuccess(() -> Component.literal("§aTurboMC storage reloaded successfully!"), false);
             source.sendSuccess(() -> Component.literal("§eNew stats: " + TurboStorageManager.getInstance().getStats().toString()), false);

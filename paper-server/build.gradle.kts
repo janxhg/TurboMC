@@ -31,11 +31,9 @@ dependencies {
     // TurboMC - YAML Support for paper-global.yml fallback (v1.3.0)
     implementation("org.yaml:snakeyaml:2.2")
     
-    // TurboMC - ViaVersion Multi-Version Support (v1.3.0 - API compatibility work in progress)
-    // NOTE: ViaVersion 5.1.1 API has numerous breaking changes from previous versions.
-    // Integration will be completed in v1.3.0 after API adapter layer is implemented.
-    // implementation("com.viaversion:viaversion-common:5.1.1")
-    // implementation("com.viaversion:viabackwards-common:5.1.1")
+    // TurboMC - ViaVersion Multi-Version Support (v1.6.0 - STABLE 4.9.0)
+    implementation("com.viaversion:viaversion-common:4.9.0")
+    implementation("com.viaversion:viabackwards-common:4.9.0")
 }
 
 paperweight {

@@ -1,10 +1,10 @@
 package com.turbomc.config;
 
 import com.moandjiezana.toml.Toml;
-import com.turbomc.storage.StorageFormat;
-import com.turbomc.storage.TurboStorageConfig;
-import com.turbomc.storage.TurboStorageMigrator;
-import com.turbomc.storage.ConversionMode;
+import com.turbomc.storage.converter.StorageFormat;
+import com.turbomc.storage.converter.TurboStorageConfig;
+import com.turbomc.storage.optimization.TurboStorageMigrator;
+import com.turbomc.storage.converter.ConversionMode;
 
 import java.io.File;
 import java.io.IOException;
@@ -572,7 +572,12 @@ public class TurboConfig {
     }
     
     public int getInt(String key, int defaultValue) {
-        return toml.getLong(key, (long) defaultValue).intValue();
+        try {
+            return toml.getLong(key, (long) defaultValue).intValue();
+        } catch (ClassCastException e) {
+            // Handle case where TOML value is a Double (e.g., 1200.0)
+            return (int) Math.round(toml.getDouble(key, (double) defaultValue));
+        }
     }
     
     public long getLong(String key, long defaultValue) {

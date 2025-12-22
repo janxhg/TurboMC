@@ -1,6 +1,6 @@
 package com.turbomc.compression;
 
-import com.turbomc.storage.LRFConstants;
+import com.turbomc.storage.lrf.LRFConstants;
 
 /**
  * Validates compression levels to prevent corruption from overly aggressive compression.

@@ -1,6 +1,6 @@
 package com.turbomc.storage.converter;
 
-import com.turbomc.storage.LRFChunkEntry;
+import com.turbomc.storage.lrf.LRFChunkEntry;
 
 import java.util.Arrays;
 import java.util.HashSet;

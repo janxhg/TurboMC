@@ -2,10 +2,10 @@ package com.turbomc.storage.converter;
 
 import com.turbomc.config.TurboConfig;
 import com.turbomc.compression.TurboCompressionService;
-import com.turbomc.storage.AnvilRegionReader;
-import com.turbomc.storage.LRFChunkEntry;
-import com.turbomc.storage.LRFConstants;
-import com.turbomc.storage.LRFRegionWriter;
+import com.turbomc.storage.optimization.AnvilRegionReader;
+import com.turbomc.storage.lrf.LRFChunkEntry;
+import com.turbomc.storage.lrf.LRFConstants;
+import com.turbomc.storage.lrf.LRFRegionWriter;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

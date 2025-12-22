@@ -1,6 +1,6 @@
 package com.turbomc.config;
 
-import com.turbomc.storage.LRFConstants;
+import com.turbomc.storage.lrf.LRFConstants;
 
 /**
  * Configuration for TurboMC compression settings.
