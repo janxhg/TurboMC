@@ -1,9 +1,9 @@
-package com.turbomc.performance;
+package com.turbomc.performance.fps;
 
 import com.turbomc.config.TurboConfig;
+import com.turbomc.performance.TurboOptimizerModule;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.ChunkPos;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit;
  * @author TurboMC
  * @version 1.0.0
  */
-public class TurboFPSOptimizer {
+public class TurboFPSOptimizer implements TurboOptimizerModule {
     
     private static volatile TurboFPSOptimizer instance;
     private static final Object INSTANCE_LOCK = new Object();
@@ -118,18 +118,15 @@ public class TurboFPSOptimizer {
         return instance;
     }
     
-    /**
-     * Initialize the FPS optimizer
-     */
+    @Override
     public void initialize() {
         if (initialized) {
             return;
         }
         
         try {
-            loadConfiguration();
+            loadConfiguration(TurboConfig.getInstance());
             initializeMetrics();
-            startPerformanceMonitoring();
             
             initialized = true;
             System.out.println("[TurboMC][FPS] FPS Optimizer initialized successfully");
@@ -141,10 +138,8 @@ public class TurboFPSOptimizer {
         }
     }
     
-    /**
-     * Load configuration from TOML
-     */
-    private void loadConfiguration() {
+    @Override
+    public void loadConfiguration(TurboConfig config) {
         if (!TurboConfig.isInitialized()) {
             // Default values
             enabled = true;
@@ -154,7 +149,6 @@ public class TurboFPSOptimizer {
             return;
         }
         
-        TurboConfig config = TurboConfig.getInstance();
         enabled = config.getBoolean("performance.fps-optimizer.enabled", true);
         targetTPS = config.getDouble("performance.target-tps", 20.0);
         tpsTolerance = config.getDouble("performance.tps-tolerance", 1.0);
@@ -174,10 +168,8 @@ public class TurboFPSOptimizer {
         System.out.println("[TurboMC][FPS] Performance metrics initialized");
     }
     
-    /**
-     * Start performance monitoring
-     */
-    private void startPerformanceMonitoring() {
+    @Override
+    public void start() {
         if (!enabled) {
             return;
         }
@@ -192,6 +184,93 @@ public class TurboFPSOptimizer {
         
         // Cleanup metrics every minute
         scheduler.scheduleAtFixedRate(this::cleanupMetrics, 60, 60, TimeUnit.SECONDS);
+    }
+    
+    @Override
+    public void stop() {
+        if (scheduler != null && !scheduler.isShutdown()) {
+            scheduler.shutdown();
+            try {
+                if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                    scheduler.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                scheduler.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+        
+        initialized = false;
+        System.out.println("[TurboMC][FPS] FPS Optimizer shutdown complete");
+    }
+    
+    @Override
+    public boolean isEnabled() {
+        return enabled;
+    }
+    
+    @Override
+    public String getModuleName() {
+        return "TurboFPSOptimizer";
+    }
+    
+    @Override
+    public String getPerformanceStats() {
+        StringBuilder stats = new StringBuilder();
+        stats.append("=== TurboMC FPS Optimizer Stats ===\n");
+        stats.append("Enabled: ").append(enabled).append("\n");
+        stats.append("Current TPS: ").append(currentTPS.get()).append("\n");
+        stats.append("Average TPS: ").append(averageTPS.get()).append("\n");
+        stats.append("Target TPS: ").append(targetTPS).append("\n");
+        stats.append("Total Optimizations: ").append(totalOptimizations.get()).append("\n");
+        stats.append("Last Optimization: ").append(lastOptimizationTime.get() > 0 ? 
+            new java.util.Date(lastOptimizationTime.get()).toString() : "Never").append("\n");
+        
+        stats.append("\n=== Metrics ===\n");
+        metrics.forEach((name, metric) -> 
+            stats.append(name).append(": ").append(metric.getValue()).append("\n"));
+        
+        return stats.toString();
+    }
+    
+    @Override
+    public boolean shouldOptimize() {
+        if (!autoOptimization || !enabled) {
+            return false;
+        }
+        
+        int currentTPSValue = currentTPS.get();
+        return currentTPSValue < (targetTPS - tpsTolerance);
+    }
+    
+    @Override
+    public void performOptimization() {
+        if (!shouldOptimize()) {
+            return;
+        }
+        
+        try {
+            int currentTPSValue = currentTPS.get();
+            PerformanceLevel level = determineOptimalPerformanceLevel(currentTPSValue);
+            applyPerformanceLevel(level);
+            
+            totalOptimizations.incrementAndGet();
+            lastOptimizationTime.set(System.currentTimeMillis());
+            
+            metrics.get("optimizations_performed").update(totalOptimizations.get());
+            metrics.get("tps_adjustments").increment();
+            
+            System.out.println("[TurboMC][FPS] Applied optimization: " + level.getName() + 
+                             " (Current TPS: " + currentTPSValue + ", Target: " + targetTPS + ")");
+            
+            // Additional optimizations based on server load
+            optimizeEntityPerformance();
+            optimizeChunkLoading();
+            optimizeMemoryUsage();
+            
+        } catch (Exception e) {
+            System.err.println("[TurboMC][FPS] Error during optimization: " + e.getMessage());
+        }
     }
     
     /**
@@ -229,43 +308,6 @@ public class TurboFPSOptimizer {
         int current = averageTPS.get();
         double smoothed = current * 0.9 + newTPS * 0.1; // 90% smoothing
         averageTPS.set((int) Math.round(smoothed));
-    }
-    
-    /**
-     * Perform automatic optimization
-     */
-    private void performOptimization() {
-        if (!autoOptimization || !enabled) {
-            return;
-        }
-        
-        try {
-            int currentTPSValue = currentTPS.get();
-            double targetTPSValue = targetTPS;
-            
-            // Check if optimization is needed
-            if (currentTPSValue < (targetTPSValue - tpsTolerance)) {
-                PerformanceLevel level = determineOptimalPerformanceLevel(currentTPSValue);
-                applyPerformanceLevel(level);
-                
-                totalOptimizations.incrementAndGet();
-                lastOptimizationTime.set(System.currentTimeMillis());
-                
-                metrics.get("optimizations_performed").update(totalOptimizations.get());
-                metrics.get("tps_adjustments").increment();
-                
-                System.out.println("[TurboMC][FPS] Applied optimization: " + level.getName() + 
-                                 " (Current TPS: " + currentTPSValue + ", Target: " + targetTPSValue + ")");
-            }
-            
-            // Additional optimizations based on server load
-            optimizeEntityPerformance();
-            optimizeChunkLoading();
-            optimizeMemoryUsage();
-            
-        } catch (Exception e) {
-            System.err.println("[TurboMC][FPS] Error during optimization: " + e.getMessage());
-        }
     }
     
     /**
@@ -403,27 +445,6 @@ public class TurboFPSOptimizer {
     }
     
     /**
-     * Get current performance statistics
-     */
-    public String getPerformanceStats() {
-        StringBuilder stats = new StringBuilder();
-        stats.append("=== TurboMC FPS Optimizer Stats ===\n");
-        stats.append("Enabled: ").append(enabled).append("\n");
-        stats.append("Current TPS: ").append(currentTPS.get()).append("\n");
-        stats.append("Average TPS: ").append(averageTPS.get()).append("\n");
-        stats.append("Target TPS: ").append(targetTPS).append("\n");
-        stats.append("Total Optimizations: ").append(totalOptimizations.get()).append("\n");
-        stats.append("Last Optimization: ").append(lastOptimizationTime.get() > 0 ? 
-            new java.util.Date(lastOptimizationTime.get()).toString() : "Never").append("\n");
-        
-        stats.append("\n=== Metrics ===\n");
-        metrics.forEach((name, metric) -> 
-            stats.append(name).append(": ").append(metric.getValue()).append("\n"));
-        
-        return stats.toString();
-    }
-    
-    /**
      * Get current TPS
      */
     public int getCurrentTPS() {
@@ -438,36 +459,9 @@ public class TurboFPSOptimizer {
     }
     
     /**
-     * Check if optimizer is enabled
-     */
-    public boolean isEnabled() {
-        return enabled;
-    }
-    
-    /**
      * Get total optimizations performed
      */
     public long getTotalOptimizations() {
         return totalOptimizations.get();
-    }
-    
-    /**
-     * Shutdown the optimizer
-     */
-    public void shutdown() {
-        if (scheduler != null && !scheduler.isShutdown()) {
-            scheduler.shutdown();
-            try {
-                if (!scheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-                    scheduler.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                scheduler.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
-        }
-        
-        initialized = false;
-        System.out.println("[TurboMC][FPS] FPS Optimizer shutdown complete");
     }
 }

@@ -7,7 +7,12 @@ import com.turbomc.storage.converter.ConversionMode;
 import com.turbomc.commands.TurboCommandRegistry;
 import com.turbomc.performance.TurboQualityManager;
 import com.turbomc.performance.TurboChunkLoadingOptimizer;
-import com.turbomc.performance.TurboFPSOptimizer;
+import com.turbomc.performance.fps.TurboFPSOptimizer;
+import com.turbomc.performance.entity.TurboRedstoneOptimizer;
+import com.turbomc.performance.entity.TurboHopperOptimizer;
+import com.turbomc.performance.entity.TurboMobSpawningOptimizer;
+import com.turbomc.performance.chunk.TurboChunkTickingOptimizer;
+import com.turbomc.performance.render.TurboParticleOptimizer;
 import com.turbomc.storage.TurboStorageManager;
 import com.turbomc.storage.TurboStorageHooks;
 import net.minecraft.commands.CommandSourceStack;
@@ -186,6 +191,31 @@ public final class TurboLRFBootstrap {
             System.out.println("[TurboMC][Perf] Initializing FPS Optimizer...");
             TurboFPSOptimizer fpsOptimizer = TurboFPSOptimizer.getInstance();
             fpsOptimizer.initialize();
+            
+            // Initialize Redstone Optimizer
+            System.out.println("[TurboMC][Perf] Initializing Redstone Optimizer...");
+            TurboRedstoneOptimizer redstoneOptimizer = TurboRedstoneOptimizer.getInstance();
+            redstoneOptimizer.initialize();
+            
+            // Initialize Hopper Optimizer
+            System.out.println("[TurboMC][Perf] Initializing Hopper Optimizer...");
+            TurboHopperOptimizer hopperOptimizer = TurboHopperOptimizer.getInstance();
+            hopperOptimizer.initialize();
+            
+            // Initialize Mob Spawning Optimizer
+            System.out.println("[TurboMC][Perf] Initializing Mob Spawning Optimizer...");
+            TurboMobSpawningOptimizer mobOptimizer = TurboMobSpawningOptimizer.getInstance();
+            mobOptimizer.initialize();
+            
+            // Initialize Chunk Ticking Optimizer
+            System.out.println("[TurboMC][Perf] Initializing Chunk Ticking Optimizer...");
+            TurboChunkTickingOptimizer chunkTickOptimizer = TurboChunkTickingOptimizer.getInstance();
+            chunkTickOptimizer.initialize();
+            
+            // Initialize Particle Optimizer
+            System.out.println("[TurboMC][Perf] Initializing Particle Optimizer...");
+            TurboParticleOptimizer particleOptimizer = TurboParticleOptimizer.getInstance();
+            particleOptimizer.initialize();
             
             // Initialize Chunk Loading Optimizer
             System.out.println("[TurboMC][Perf] Initializing Chunk Loading Optimizer...");
