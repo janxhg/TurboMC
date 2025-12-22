@@ -60,14 +60,11 @@ public class ZstdCompressor implements Compressor {
             // Zstd.decompressedSize(byte[] src, int offset)
             long originalSize = Zstd.decompressedSize(compressed, 1, compressed.length - 1);
             
-            if (originalSize == 0) { // 0 can mean unknown or empty
-                 // For empty check manually?
-                 if (compressed.length == 1) return new byte[0]; // Just magic byte
-                 // Otherwise unknown size. Streaming decompression needed?
-                 // For TurboMC chunks, we assume known size or we might need frame header writing.
-                 // Zstd default compress DOES write size if possible.
-                 // If not, we might be in trouble. But typically it works.
-                 // Let's assume valid frame.
+            // FIXED: Handle unknown size properly
+            if (originalSize == 0) { 
+                if (compressed.length == 1) return new byte[0]; // Just magic byte
+                // Unknown size - need to use streaming decompression
+                throw new CompressionException("Zstd frame size unknown - not supported for chunk data");
             }
             
             if (originalSize > Integer.MAX_VALUE) {

@@ -34,6 +34,10 @@ public class LRFRegionReader implements AutoCloseable {
     private final Int2ObjectMap<byte[]> chunkCache;
     private final Object cacheLock = new Object();
     
+    // FIXED: Memory usage tracking for cache
+    private final AtomicLong currentCacheSize = new AtomicLong(0);
+    private static final long MAX_CACHE_MEMORY = 64 * 1024 * 1024; // 64MB limit
+    
     // Stats
     private final AtomicLong cacheHits;
     private final AtomicLong cacheMisses;
@@ -132,7 +136,8 @@ public class LRFRegionReader implements AutoCloseable {
                           ((rawSectorData[2] & 0xFF) << 8) | 
                           (rawSectorData[3] & 0xFF);
                           
-        if (exactLength <= 0 || exactLength > size - 4) {
+        // Enhanced validation with stricter bounds checking
+        if (exactLength <= 0 || exactLength > size - 4 || exactLength > LRFConstants.MAX_CHUNK_SIZE) {
              // If invalid, we cannot trust this chunk.
              // This might happen if reading an old chunk format (v1.0)
              // But treating it as v1.1 is safer than crashing Zstd.
@@ -154,10 +159,13 @@ public class LRFRegionReader implements AutoCloseable {
             data = TurboCompressionService.getInstance().decompress(compressedPayload);
         }
         
-        // Cache the result (with size limit simple check)
+        // FIXED: Cache with memory management
         synchronized (cacheLock) {
-            if (chunkCache.size() < LRFConstants.CACHE_SIZE) {
+            // Check memory limit before adding
+            long newCacheSize = currentCacheSize.get() + data.length;
+            if (newCacheSize <= MAX_CACHE_MEMORY && chunkCache.size() < LRFConstants.CACHE_SIZE) {
                 chunkCache.put(chunkIndex, data);
+                currentCacheSize.addAndGet(data.length);
             }
         }
         

@@ -151,11 +151,14 @@ public class LRFRegionWriter implements AutoCloseable {
             }
         }
         
-        // Get current file position for offset
-        long currentPos = channel.position();
-        if (currentPos < LRFConstants.HEADER_SIZE) {
-            currentPos = LRFConstants.HEADER_SIZE;
-            channel.position(currentPos);
+        // FIXED: Thread-safe file position management
+        long currentPos;
+        synchronized (channel) {
+            currentPos = channel.position();
+            if (currentPos < LRFConstants.HEADER_SIZE) {
+                currentPos = LRFConstants.HEADER_SIZE;
+                channel.position(currentPos);
+            }
         }
         
         // Write chunk data with buffer

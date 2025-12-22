@@ -18,35 +18,35 @@ fallback-enabled = true
 
 [storage]
 # Region file format: "auto" (detect), "lrf" (optimized), or "mca" (vanilla)
-format = "lrf"
+format = "mca"
 
 # Automatically convert MCA to LRF when loading chunks
-auto-convert = true
+auto-convert = false
 
 # Conversion mode: "on-demand" (convert as chunks load), "background" (idle time), or "manual"
-conversion-mode = "on-demand"
+conversion-mode = "manual"
 
 # Batch operations configuration
 [storage.batch]
 # Enable batch chunk loading/saving
-enabled = true
+enabled = false
 
 # Number of threads for batch loading operations
-load-threads = 4
+load-threads = 1
 
 # Number of threads for batch saving operations  
-save-threads = 2
+save-threads = 1
 
 # Maximum chunks per batch operation
-batch-size = 32
+batch-size = 1
 
 # Maximum concurrent loading operations
-max-concurrent-loads = 64
+max-concurrent-loads = 1
 
 # Memory-mapped read-ahead engine
 [storage.mmap]
 # Enable memory-mapped read-ahead for SSD/NVMe optimization
-enabled = true
+enabled = false
 
 # Maximum cache size in number of chunks
 max-cache-size = 512

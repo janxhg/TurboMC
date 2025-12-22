@@ -273,7 +273,12 @@ public class TurboViaConfig implements ViaVersionConfig {
             case "1.21.2": return 769;
             case "1.21.3": return 770;
             case "1.21.4": return 771;
-            case "1.21.10": return 771; // Mismo protocolo que 1.21.4
+            case "1.21.5": return 772;
+            case "1.21.6": return 773;
+            case "1.21.7": return 774;
+            case "1.21.8": return 775;
+            case "1.21.9": return 776;
+            case "1.21.10": return 777;
             default: return -1; // Versión no reconocida
         }
     }

@@ -309,7 +309,11 @@ public class TurboRegionFileStorage extends RegionFileStorage {
             try {
                 return reader.readChunkPublic(pos.x, pos.z);
             } finally {
-                reader.close();
+                try {
+                    reader.close();
+                } catch (Exception e) {
+                    System.err.println("[TurboMC][Storage] Error closing MCA reader: " + e.getMessage());
+                }
             }
             
         } catch (Exception e) {
@@ -463,8 +467,16 @@ public class TurboRegionFileStorage extends RegionFileStorage {
                 return !hasCorruption;
                 
             } finally {
-                validator.close();
-                reader.close();
+                try {
+                    validator.close();
+                } catch (Exception e) {
+                    System.err.println("[TurboMC][Storage] Error closing integrity validator: " + e.getMessage());
+                }
+                try {
+                    reader.close();
+                } catch (Exception e) {
+                    System.err.println("[TurboMC][Storage] Error closing MCA reader: " + e.getMessage());
+                }
             }
             
         } catch (Exception e) {

@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.logging.Logger;
 
 /**
  * Central manager for all TurboMC storage operations.
@@ -29,6 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public class TurboStorageManager implements AutoCloseable {
     
+    private static final Logger LOGGER = Logger.getLogger(TurboStorageManager.class.getName());
     private static volatile TurboStorageManager instance;
     private static final Object INSTANCE_LOCK = new Object();
     
@@ -275,12 +277,13 @@ public class TurboStorageManager implements AutoCloseable {
                 java.util.List<LRFChunkEntry> results = new java.util.ArrayList<>();
                 for (CompletableFuture<LRFChunkEntry> future : futures) {
                     try {
-                        LRFChunkEntry chunk = future.get();
+                        LRFChunkEntry chunk = future.get(10, java.util.concurrent.TimeUnit.SECONDS);
                         if (chunk != null) {
                             results.add(chunk);
                         }
                     } catch (Exception e) {
-                        // Skip failed chunks
+                        LOGGER.warn("Failed to load chunk during batch operation", e);
+                        // Skip failed chunks but continue with others
                     }
                 }
                 return results;
@@ -491,21 +494,37 @@ public class TurboStorageManager implements AutoCloseable {
         if (isClosed.compareAndSet(false, true)) {
             System.out.println("[TurboMC][Storage] Shutting down storage manager...");
             
-            // Close all components
+            // FIXED: Add exception handling for resource cleanup
             for (ChunkBatchLoader loader : batchLoaders.values()) {
-                loader.close();
+                try {
+                    loader.close();
+                } catch (Exception e) {
+                    System.err.println("[TurboMC][Storage] Error closing batch loader: " + e.getMessage());
+                }
             }
             
             for (ChunkBatchSaver saver : batchSavers.values()) {
-                saver.close();
+                try {
+                    saver.close();
+                } catch (Exception e) {
+                    System.err.println("[TurboMC][Storage] Error closing batch saver: " + e.getMessage());
+                }
             }
             
             for (MMapReadAheadEngine engine : readAheadEngines.values()) {
-                engine.close();
+                try {
+                    engine.close();
+                } catch (Exception e) {
+                    System.err.println("[TurboMC][Storage] Error closing read-ahead engine: " + e.getMessage());
+                }
             }
             
             for (ChunkIntegrityValidator validator : integrityValidators.values()) {
-                validator.close();
+                try {
+                    validator.close();
+                } catch (Exception e) {
+                    System.err.println("[TurboMC][Storage] Error closing integrity validator: " + e.getMessage());
+                }
             }
             
             // Clear collections

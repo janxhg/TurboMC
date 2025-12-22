@@ -10,7 +10,7 @@ import java.util.zip.Inflater;
  * Compatible with vanilla Minecraft compression format.
  */
 public class ZlibCompressor implements Compressor {
-    private static final byte MAGIC_BYTE = 0x01;
+    private static final byte MAGIC_BYTE = 0x78; // FIXED: Match service expectation (zlib default)
     
     private final int level;
     
@@ -18,6 +18,13 @@ public class ZlibCompressor implements Compressor {
     private final ThreadLocal<Deflater> deflaterCache;
     private final ThreadLocal<Inflater> inflaterCache;
     private final ThreadLocal<byte[]> bufferCache = ThreadLocal.withInitial(() -> new byte[8192]);
+    
+    // FIXED: Add cleanup method to prevent memory leaks
+    public void cleanup() {
+        deflaterCache.remove();
+        inflaterCache.remove();
+        bufferCache.remove();
+    }
     
     public ZlibCompressor(int level) {
         this.level = Math.max(1, Math.min(9, level));

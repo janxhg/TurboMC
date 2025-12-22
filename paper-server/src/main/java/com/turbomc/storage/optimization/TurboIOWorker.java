@@ -71,9 +71,13 @@ public class TurboIOWorker implements ChunkScanAccess, AutoCloseable {
 
         for (int regionX = chunkPos1.getRegionX(); regionX <= chunkPos2.getRegionX(); regionX++) {
             for (int regionZ = chunkPos1.getRegionZ(); regionZ <= chunkPos2.getRegionZ(); regionZ++) {
-                BitSet bitSet = this.getOrCreateOldDataForRegion(regionX, regionZ).join();
-                if (!bitSet.isEmpty()) {
-                    return true;
+                try {
+                    BitSet bitSet = this.getOrCreateOldDataForRegion(regionX, regionZ).get(5, java.util.concurrent.TimeUnit.SECONDS);
+                    if (!bitSet.isEmpty()) {
+                        return true;
+                    }
+                } catch (Exception e) {
+                    LOGGER.warn("Failed to check old chunk region {} {}", regionX, regionZ, e);
                 }
             }
         }
@@ -88,8 +92,12 @@ public class TurboIOWorker implements ChunkScanAccess, AutoCloseable {
 
         for (int regionX = chunkPos1.getRegionX(); regionX <= chunkPos2.getRegionX(); regionX++) {
             for (int regionZ = chunkPos1.getRegionZ(); regionZ <= chunkPos2.getRegionZ(); regionZ++) {
-                BitSet bitSet2 = this.getOrCreateOldDataForRegion(regionX, regionZ).join();
-                bitSet.or(bitSet2);
+                try {
+                    BitSet bitSet2 = this.getOrCreateOldDataForRegion(regionX, regionZ).get(5, java.util.concurrent.TimeUnit.SECONDS);
+                    bitSet.or(bitSet2);
+                } catch (Exception e) {
+                    LOGGER.warn("Failed to get old chunks around region {} {}", regionX, regionZ, e);
+                }
             }
         }
 
@@ -212,13 +220,25 @@ public class TurboIOWorker implements ChunkScanAccess, AutoCloseable {
             return CompletableFuture.completedFuture(null);
         } else {
             CompletableFuture<T> completableFuture = new CompletableFuture<>();
-            this.consecutiveExecutor.scheduleWithResult(priority.ordinal(), (future) -> {
+            
+            // For PaperMC Moonrise compatibility, ensure critical operations run on main thread
+            if (priority == Priority.FOREGROUND) {
+                // Run critical operations synchronously on main thread
                 try {
                     completableFuture.complete(task.get());
                 } catch (Exception var3) {
                     completableFuture.completeExceptionally(var3);
                 }
-            });
+            } else {
+                // Background operations can use the executor
+                this.consecutiveExecutor.scheduleWithResult(priority.ordinal(), (future) -> {
+                    try {
+                        completableFuture.complete(task.get());
+                    } catch (Exception var3) {
+                        completableFuture.completeExceptionally(var3);
+                    }
+                });
+            }
             return completableFuture;
         }
     }

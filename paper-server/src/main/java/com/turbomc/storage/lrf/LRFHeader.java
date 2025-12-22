@@ -194,12 +194,15 @@ public class LRFHeader {
         int index = LRFConstants.getChunkIndex(chunkX, chunkZ);
         if (!chunkExists[index]) return 0;
         
+        // FIXED: Use thread-safe buffer access with position isolation
+        ByteBuffer bufferCopy;
         synchronized (offsetTable) {
-            offsetTable.position(index * 4);
-            int entry = offsetTable.getInt();
-            int offsetSectors = (entry >>> 8) & 0xFFFFFF;
-            return offsetSectors * 256;
+            bufferCopy = offsetTable.duplicate();
+            bufferCopy.position(index * 4);
         }
+        int entry = bufferCopy.getInt();
+        int offsetSectors = (entry >>> 8) & 0xFFFFFF;
+        return offsetSectors * 256;
     }
     
     /**
@@ -213,12 +216,15 @@ public class LRFHeader {
         int index = LRFConstants.getChunkIndex(chunkX, chunkZ);
         if (!chunkExists[index]) return 0;
         
+        // FIXED: Use thread-safe buffer access with position isolation
+        ByteBuffer bufferCopy;
         synchronized (offsetTable) {
-            offsetTable.position(index * 4);
-            int entry = offsetTable.getInt();
-            int sizeSectors = entry & 0xFF;
-            return sizeSectors * 4096;
+            bufferCopy = offsetTable.duplicate();
+            bufferCopy.position(index * 4);
         }
+        int entry = bufferCopy.getInt();
+        int sizeSectors = entry & 0xFF;
+        return sizeSectors * 4096;
     }
     
     /**
@@ -237,16 +243,19 @@ public class LRFHeader {
      * Set chunk offset and size (for writing).
      */
     public void setChunkData(int chunkX, int chunkZ, int offset, int size) {
+        // FIXED: Use thread-safe buffer access with position isolation
         int index = LRFConstants.getChunkIndex(chunkX, chunkZ);
+        int offsetSectors = offset / 256;
+        int sizeSectors = (size + 4095) / 4096; // Round up to sectors
         
+        ByteBuffer bufferCopy;
         synchronized (offsetTable) {
-            offsetTable.position(index * 4);
-            int offsetSectors = offset / 256;
-            int sizeSectors = (size + 4095) / 4096; // Round up to 4KB sectors
-            int entry = (offsetSectors << 8) | (sizeSectors & 0xFF);
-            offsetTable.putInt(entry);
+            bufferCopy = offsetTable.duplicate();
+            bufferCopy.position(index * 4);
         }
+        bufferCopy.putInt((offsetSectors << 8) | (sizeSectors & 0xFF));
         
+        // Update existence flag
         chunkExists[index] = size > 0;
     }
     
