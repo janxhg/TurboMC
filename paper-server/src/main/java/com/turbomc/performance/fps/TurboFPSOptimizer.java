@@ -61,7 +61,12 @@ public class TurboFPSOptimizer implements TurboOptimizerModule {
         HIGH("High", 0.85),
         MEDIUM("Medium", 0.7),
         LOW("Low", 0.5),
-        MINIMAL("Minimal", 0.3);
+        MINIMAL("Minimal", 0.3),
+        BALANCED("Balanced", 0.8),
+        CONSERVATIVE("Conservative", 0.75),
+        PERFORMANCE("Performance", 0.9),
+        EXTREME("Extreme", 1.0),
+        ADAPTIVE("Adaptive", 0.85);
         
         private final String name;
         private final double qualityFactor;

@@ -25,6 +25,13 @@ public final class TurboCommandRegistry {
     }
     
     /**
+     * Create a new instance for plugin use.
+     */
+    public static TurboCommandRegistry create() {
+        return new TurboCommandRegistry();
+    }
+    
+    /**
      * Register all TurboMC commands.
      * Call this during server startup after commands are initialized.
      * 
@@ -231,15 +238,114 @@ public final class TurboCommandRegistry {
             sender.sendMessage("  §7Chunks Decompressed: §a" + stats.getTotalDecompressed());
             sender.sendMessage("  §7Corrupted Chunks: §c" + stats.getTotalCorrupted() + " §7(" + String.format("%.2f%%", stats.getCorruptionRate()) + "%)");
             sender.sendMessage("  §7Avg Load Time: §a" + String.format("%.2fms", stats.getAvgLoadTime()));
+            sender.sendMessage("  §7Cache Hit Rate: §a" + String.format("%.1f%%", stats.getCacheHitRate()));
             
             sender.sendMessage("§eFeatures:");
             sender.sendMessage("  §7Batch Operations: " + (stats.isBatchEnabled() ? "§aENABLED" : "§cDISABLED"));
             sender.sendMessage("  §7Memory-Mapped I/O: " + (stats.isMmapEnabled() ? "§aENABLED" : "§cDISABLED"));
             sender.sendMessage("  §7Integrity Validation: " + (stats.isIntegrityEnabled() ? "§aENABLED" : "§cDISABLED"));
             
+            // Enhanced storage information
+            sender.sendMessage("§eStorage Format Analysis:");
+            analyzeStorageFormats(sender);
+            
+            // World-specific information
+            sender.sendMessage("§eWorld Storage Status:");
+            analyzeWorldStorage(sender);
+            
         } catch (Exception e) {
             sender.sendMessage("§cError getting storage stats: " + e.getMessage());
         }
+    }
+    
+    private static void analyzeStorageFormats(CommandSender sender) {
+        try {
+            org.bukkit.Bukkit.getWorlds().forEach(world -> {
+                try {
+                    java.nio.file.Path worldPath = world.getWorldFolder().toPath().resolve("region");
+                    if (java.nio.file.Files.exists(worldPath)) {
+                        int lrfCount = 0;
+                        int mcaCount = 0;
+                        long lrfSize = 0;
+                        long mcaSize = 0;
+                        
+                        try (java.util.stream.Stream<java.nio.file.Path> files = java.nio.file.Files.list(worldPath)) {
+                            java.util.List<java.nio.file.Path> regionFiles = files
+                                .filter(path -> path.toString().endsWith(".lrf") || path.toString().endsWith(".mca"))
+                                .toList();
+                            
+                            for (java.nio.file.Path file : regionFiles) {
+                                long size = java.nio.file.Files.size(file);
+                                if (file.toString().endsWith(".lrf")) {
+                                    lrfCount++;
+                                    lrfSize += size;
+                                } else {
+                                    mcaCount++;
+                                    mcaSize += size;
+                                }
+                            }
+                        }
+                        
+                        sender.sendMessage("  §7" + world.getName() + ":");
+                        sender.sendMessage("    §aLRF: §b" + lrfCount + " files §7(" + formatSize(lrfSize) + ")");
+                        sender.sendMessage("    §cMCA: §b" + mcaCount + " files §7(" + formatSize(mcaSize) + ")");
+                        
+                        if (lrfCount > 0 && mcaCount > 0) {
+                            double conversionRate = (double) lrfCount / (lrfCount + mcaCount) * 100;
+                            sender.sendMessage("    §7Conversion Progress: §a" + String.format("%.1f%%", conversionRate));
+                        } else if (lrfCount > 0) {
+                            sender.sendMessage("    §7Status: §aFully converted to LRF");
+                        } else {
+                            sender.sendMessage("    §7Status: §cUsing MCA format");
+                        }
+                    }
+                } catch (Exception e) {
+                    sender.sendMessage("  §c" + world.getName() + ": Error analyzing - " + e.getMessage());
+                }
+            });
+        } catch (Exception e) {
+            sender.sendMessage("  §cError analyzing storage formats: " + e.getMessage());
+        }
+    }
+    
+    private static void analyzeWorldStorage(CommandSender sender) {
+        try {
+            org.bukkit.Bukkit.getWorlds().forEach(world -> {
+                try {
+                    net.minecraft.server.level.ServerLevel serverLevel = ((org.bukkit.craftbukkit.CraftWorld) world).getHandle();
+                    
+                    // Get chunk information
+                    int loadedChunks = serverLevel.getChunkSource().getLoadedChunksCount();
+                    
+                    sender.sendMessage("  §7" + world.getName() + ":");
+                    sender.sendMessage("    §7Loaded Chunks: §a" + loadedChunks);
+                    
+                    // Try to get storage type information
+                    try {
+                        Object chunkSource = serverLevel.getChunkSource();
+                        if (chunkSource.getClass().getName().contains("Turbo")) {
+                            sender.sendMessage("    §7Storage: §aTurboMC Enhanced");
+                        } else {
+                            sender.sendMessage("    §7Storage: §7Vanilla");
+                        }
+                    } catch (Exception e) {
+                        sender.sendMessage("    §7Storage: §7Unknown");
+                    }
+                    
+                } catch (Exception e) {
+                    sender.sendMessage("  §c" + world.getName() + ": Error getting world info - " + e.getMessage());
+                }
+            });
+        } catch (Exception e) {
+            sender.sendMessage("  §cError analyzing world storage: " + e.getMessage());
+        }
+    }
+    
+    private static String formatSize(long bytes) {
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
+        if (bytes < 1024 * 1024 * 1024) return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
+        return String.format("%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0));
     }
     
     private static void handleStorageConvert(CommandSender sender) {

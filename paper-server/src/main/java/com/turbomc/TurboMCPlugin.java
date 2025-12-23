@@ -70,7 +70,7 @@ public class TurboMCPlugin extends JavaPlugin {
     
     private void initializeCommands() {
         try {
-            this.commandRegistry = new TurboCommandRegistry();
+            this.commandRegistry = TurboCommandRegistry.create();
             LOGGER.info("Turbo Commands registered");
         } catch (Exception e) {
             LOGGER.severe("Failed to initialize Commands: " + e.getMessage());

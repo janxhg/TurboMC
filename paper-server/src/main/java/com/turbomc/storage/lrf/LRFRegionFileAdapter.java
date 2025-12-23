@@ -253,11 +253,6 @@ public class LRFRegionFileAdapter extends RegionFile {
     public void flush() throws IOException {
         channel.force(true);
     }
-
-    @Override
-    public void close() throws IOException {
-        channel.close();
-    }
     
     @Override
     public boolean doesChunkExist(ChunkPos chunkPos) {
@@ -346,6 +341,32 @@ public class LRFRegionFileAdapter extends RegionFile {
      */
     public Path getFile() {
         return filePath;
+    }
+    
+    /**
+     * Close the file channel and ensure data is flushed to disk.
+     * Override parent close() to add force() sync.
+     */
+    @Override
+    public void close() throws IOException {
+        synchronized (fileLock) {
+            try {
+                if (channel != null && channel.isOpen()) {
+                    // Force metadata and data to be written to disk
+                    channel.force(true);
+                }
+                // Call parent close() which handles the actual channel closing
+                super.close();
+            } catch (NullPointerException e) {
+                // Handle case where parent file field is null during shutdown
+                System.err.println("[TurboMC][LRF] Warning: Parent file field is null during close, channel state: " + 
+                    (channel != null ? (channel.isOpen() ? "open" : "closed") : "null"));
+                // Try to close channel directly if super.close() fails
+                if (channel != null && channel.isOpen()) {
+                    channel.close();
+                }
+            }
+        }
     }
     
     // Override other public methods if necessary...

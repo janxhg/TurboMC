@@ -236,6 +236,9 @@ public class LRFRegionWriter implements AutoCloseable {
         headerBuffer.flip();
         channel.write(headerBuffer, 0);
         
+        // CRITICAL: Force sync to disk to prevent corruption
+        channel.force(true);
+        
         headerWritten = true;
         
         System.out.println("[TurboMC] Streaming flush: " + chunksCompressed.get() + 
@@ -311,10 +314,13 @@ public class LRFRegionWriter implements AutoCloseable {
         // Truncate file to actual size
         channel.truncate(currentOffset);
         
+        // CRITICAL: Force sync to disk to prevent corruption
+        channel.force(true);
+        
         headerWritten = true;
         
         System.out.println("[TurboMC] Batch flush: " + chunks.size() + " chunks to " + 
-                         filePath.getFileName() + " (" + currentOffset + " bytes)");
+                         " (" + currentOffset + " bytes)");
     }
     
     /**
