@@ -17,6 +17,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentHashMap;
+import net.minecraft.world.level.ChunkPos;
 
 /**
  * High-performance batch chunk saver for LRF regions.
@@ -41,6 +43,7 @@ public class ChunkBatchSaver implements AutoCloseable {
     private final AtomicBoolean isClosed;
     private final AtomicInteger chunksSaved;
     private final AtomicInteger chunksCompressed;
+    private final ConcurrentHashMap<Long, LRFChunkEntry> inflightChunks;
     private final long startTime;
     
     // Configuration
@@ -115,6 +118,7 @@ public class ChunkBatchSaver implements AutoCloseable {
         this.isClosed = new AtomicBoolean(false);
         this.chunksSaved = new AtomicInteger(0);
         this.chunksCompressed = new AtomicInteger(0);
+        this.inflightChunks = new ConcurrentHashMap<>();
         this.startTime = System.currentTimeMillis();
         
         System.out.println("[TurboMC] ChunkBatchSaver initialized: " + regionPath.getFileName() +
@@ -137,6 +141,10 @@ public class ChunkBatchSaver implements AutoCloseable {
         }
         
         CompletableFuture<Void> completionFuture = new CompletableFuture<>();
+        
+        // Track chunk as in-flight
+        inflightChunks.put(ChunkPos.asLong(chunk.getChunkX(), chunk.getChunkZ()), chunk);
+        
         synchronized (pendingChunks) {
             pendingChunks.add(chunk);
             chunkFutures.add(completionFuture);
@@ -205,6 +213,11 @@ public class ChunkBatchSaver implements AutoCloseable {
             .thenComposeAsync(v -> compressBatch(currentBatch), compressionExecutor)
             .thenComposeAsync(compressedChunks -> writeBatch(compressedChunks), writeExecutor)
             .whenComplete((result, throwable) -> {
+                // Clean up inflight tracking
+                for (LRFChunkEntry chunk : currentBatch) {
+                    inflightChunks.remove(ChunkPos.asLong(chunk.getChunkX(), chunk.getChunkZ()));
+                }
+                
                 if (throwable != null) {
                     System.err.println("[TurboMC] Error saving batch: " + throwable.getMessage());
                     for (CompletableFuture<Void> f : currentFutures) f.completeExceptionally(throwable);
@@ -316,6 +329,14 @@ public class ChunkBatchSaver implements AutoCloseable {
         }
     }
     
+    /**
+     * Get a pending or in-flight chunk if available.
+     * Allows "read-your-writes" consistency.
+     */
+    public LRFChunkEntry getPendingChunk(int chunkX, int chunkZ) {
+        return inflightChunks.get(ChunkPos.asLong(chunkX, chunkZ));
+    }
+
     /**
      * Get statistics about the saver performance.
      */

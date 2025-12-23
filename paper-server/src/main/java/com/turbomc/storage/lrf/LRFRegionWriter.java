@@ -140,14 +140,7 @@ public class LRFRegionWriter implements AutoCloseable {
         
         byte[] data = chunk.getData();
         
-        // Append timestamp to data
-        ByteBuffer dataWithTimestamp = ByteBuffer.allocate(data.length + 8);
-        dataWithTimestamp.put(data);
-        dataWithTimestamp.putLong(chunk.getTimestamp());
-        dataWithTimestamp.flip();
-        
-        byte[] dataToWrite = new byte[dataWithTimestamp.remaining()];
-        dataWithTimestamp.get(dataToWrite);
+        byte[] dataToWrite = chunk.getData();
         
         // Compress if needed with error handling
         byte[] compressedData;
@@ -287,14 +280,7 @@ public class LRFRegionWriter implements AutoCloseable {
             
             byte[] data = chunk.getData();
             
-            // Append timestamp to data
-            ByteBuffer dataWithTimestamp = ByteBuffer.allocate(data.length + 8);
-            dataWithTimestamp.put(data);
-            dataWithTimestamp.putLong(chunk.getTimestamp());
-            dataWithTimestamp.flip();
-            
-            byte[] dataToWrite = new byte[dataWithTimestamp.remaining()];
-            dataWithTimestamp.get(dataToWrite);
+            byte[] dataToWrite = chunk.getData();
             
             // Compress if needed with error handling
             byte[] compressedData;

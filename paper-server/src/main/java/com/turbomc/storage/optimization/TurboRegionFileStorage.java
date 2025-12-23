@@ -186,13 +186,19 @@ public class TurboRegionFileStorage extends RegionFileStorage {
                 return null;
             }
             
-            // Remove timestamp if present (last 8 bytes) - FIXED: Check if timestamp exists
+            // NEW: Support for PackedBinaryNBT (TNBT magic)
+            if (data.length > 5 && data[0] == 'T' && data[1] == 'N' && data[2] == 'B' && data[3] == 'T') {
+                return com.turbomc.nbt.NBTConverter.fromPackedBinary(
+                    com.turbomc.nbt.PackedBinaryNBT.fromBytes(data)
+                );
+            }
+            
+            // LEGACY: Check for timestamp at the end of standard NBT data
             if (data.length >= 8) {
                 // Check if last 8 bytes look like a timestamp (reasonable range)
                 long potentialTimestamp = java.nio.ByteBuffer.wrap(data, data.length - 8, 8).getLong();
                 long currentTime = System.currentTimeMillis();
-                // Check if timestamp is within reasonable range (1970-2100)
-                if (potentialTimestamp > 0 && potentialTimestamp < currentTime + 86400000L * 365 * 130) { // Within 130 years
+                if (potentialTimestamp > 0 && potentialTimestamp < currentTime + 86400000L * 365 * 130) {
                     byte[] nbtData = new byte[data.length - 8];
                     System.arraycopy(data, 0, nbtData, 0, nbtData.length);
                     data = nbtData;
@@ -216,43 +222,19 @@ public class TurboRegionFileStorage extends RegionFileStorage {
         long startTime = System.nanoTime();
         
         try {
-            // Serialize NBT to bytes
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            NbtIo.write(nbt, new DataOutputStream(baos));
-            byte[] nbtData = baos.toByteArray();
+            // OPTIMIZATION: Use PackedBinaryNBT for LRF storage instead of standard NBT
+            // This is significantly faster and smaller for chunk data
+            byte[] dataToWrite = com.turbomc.nbt.NBTConverter.toPackedBinary(nbt).toBytes();
             
-            // Add timestamp (current time in milliseconds)
-            ByteBuffer dataWithTimestamp = ByteBuffer.allocate(nbtData.length + 8);
-            dataWithTimestamp.put(nbtData);
-            dataWithTimestamp.putLong(System.currentTimeMillis());
-            dataWithTimestamp.flip();
-            
-            byte[] dataToWrite = new byte[dataWithTimestamp.remaining()];
-            dataWithTimestamp.get(dataToWrite);
-            
-            // Create chunk entry
-            LRFChunkEntry chunk = new LRFChunkEntry(pos.x, pos.z, dataToWrite);
-            
-            // Save chunk asynchronously with configurable timeout
-            int timeoutSeconds = TurboConfig.getInstance().getInt("storage.lrf.timeout-seconds", 5);
-            CompletableFuture<Void> future = TurboStorageManager.getInstance().saveChunk(
-                regionPath, pos.x, pos.z, dataToWrite);
-            
-            // FIXED: Use proper timeout handling with retry logic
-            TurboExceptionHandler.handleTimeout(
-                "writeToLRF",
-                "region=" + regionPath.getFileName() + ",chunk=" + pos,
-                (attempt) -> {
-                    future.get(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS);
-                    return null;
-                },
-                3
-            );
+            // Hand off to Storage Manager (NON-BLOCKING)
+            // We do NOT call future.get() here. The Storage Manager handles the write in its own pool.
+            // Consistency is maintained via the inflightChunks cache in BatchSaver.
+            TurboStorageManager.getInstance().saveChunk(regionPath, pos.x, pos.z, dataToWrite);
             
             long elapsed = System.nanoTime() - startTime;
-            if (verbose && elapsed > 1_000_000) { // Log if > 1ms
-                System.out.println("[TurboMC][RegionStorage] Wrote chunk " + pos + 
-                                 " to LRF in " + elapsed / 1_000_000 + "ms");
+            if (verbose && elapsed > 500_000) { // Log if > 0.5ms (non-blocking should be nearly zero)
+                System.out.println("[TurboMC][RegionStorage] Handed off chunk " + pos + 
+                                 " to LRF buffer in " + elapsed / 1_000_000.0 + "ms");
             }
             
             // Enforce FULL_LRF-style semantics on disk where appropriate:

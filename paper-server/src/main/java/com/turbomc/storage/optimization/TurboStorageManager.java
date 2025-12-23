@@ -161,6 +161,18 @@ public class TurboStorageManager implements AutoCloseable {
             }
         }
         
+        // Check pending writes in BatchSaver (Read-Your-Writes Consistency)
+        // This is critical for generation performance to avoid checking disk for chunks currently in write buffer
+        if (batchEnabled) {
+            ChunkBatchSaver saver = batchSavers.get(regionPath);
+            if (saver != null) {
+                LRFChunkEntry pendingChunk = saver.getPendingChunk(chunkX, chunkZ);
+                if (pendingChunk != null) {
+                    return CompletableFuture.completedFuture(pendingChunk);
+                }
+            }
+        }
+        
         // Fallback to batch loader
         if (batchEnabled) {
             ChunkBatchLoader loader = getBatchLoader(regionPath);

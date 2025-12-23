@@ -187,20 +187,8 @@ public class LRFRegionReader implements AutoCloseable {
     /**
      * Helper method to create chunk entry.
      */
-    private LRFChunkEntry createChunkEntry(int chunkX, int chunkZ, byte[] fullDecompressedData) {
-        // Timestamp is stored at the end of each decompressed block (8 bytes)
-        long timestamp = 0;
-        byte[] pureNbtData = fullDecompressedData;
-        
-        if (fullDecompressedData.length >= 8) {
-            ByteBuffer tsBuffer = ByteBuffer.wrap(fullDecompressedData, fullDecompressedData.length - 8, 8);
-            timestamp = tsBuffer.getLong();
-            
-            // Extract pure NBT data (everything except last 8 bytes)
-            pureNbtData = new byte[fullDecompressedData.length - 8];
-            System.arraycopy(fullDecompressedData, 0, pureNbtData, 0, pureNbtData.length);
-        }
-        return new LRFChunkEntry(chunkX, chunkZ, pureNbtData, timestamp);
+    private LRFChunkEntry createChunkEntry(int chunkX, int chunkZ, byte[] data) {
+        return new LRFChunkEntry(chunkX, chunkZ, data);
     }
 
     /**
