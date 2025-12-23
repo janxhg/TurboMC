@@ -4,7 +4,29 @@
 TurboMC es un fork avanzado de PaperMC enfocado en **alto rendimiento**, **almacenamiento moderno** y **estabilidad extrema**, diseñado para servidores con alta carga de chunks, entidades y tráfico de red.
 
 
-## 💾 Advanced Converters (v1.9.0)
+## 💾 Advanced Converters & Integration (v1.9.5)
+
+### PaperMC Architecture Alignment
+**Estado:** Implementado & Optimizado
+**Paquete:** `com.turbomc.storage.optimization`
+
+Eliminación de conflictos arquitectónicos con PaperMC mediante la consolidación de recursos.
+
+- **Global Thread Pooling:** Se eliminó la "explosión de hilos" (thread explosion) por región. Ahora todo el servidor usa 4 pools globales (Load, Save, Comp, Decomp) escalables según los núcleos de la CPU.
+- **Context Switching Reduction:** Reducción drástica del overhead de CPU al evitar la creación de cientos de hilos competidores.
+- **Resource Protection:** Sistema inteligente de cierre de regiones que protege los recursos compartidos.
+
+### Hopper "Smart Sleep"
+**Estado:** Implementado & Validado
+**Clase:** `HopperBlockEntity`
+
+Optimización agresiva de Tolvas (Hoppers) para servidores con granjas masivas.
+
+- **Adaptive Cooldown:** Las tolvas inactivas entran en un modo de "sueño" aumentando su cooldown exponencialmente (de 8 a 200 ticks) si no hay ítems que mover.
+- **Instant Wake-up:** Despertar instantáneo al detectar cambios en el inventario propio o mediante eventos externos.
+- **Paper Compatible:** Diseñado para trabajar sobre las optimizaciones nativas de Paper sin reemplazarlas.
+
+---
 
 ### NBT Packed-Binary Format (Internal)
 **Estado:** Implementado & Validado

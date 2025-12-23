@@ -637,6 +637,10 @@ public class TurboConfig {
         return toml.getList("version-control.blocked-versions", List.of());
     }
     
+    public boolean isHopperOptimizationEnabled() {
+        return toml.getBoolean("fps.hopper_optimization_enabled", true);
+    }
+    
     // Generic getter methods for any configuration value
     public String getString(String key, String defaultValue) {
         return toml.getString(key, defaultValue);

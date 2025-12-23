@@ -42,6 +42,7 @@ public class ChunkBatchLoader implements AutoCloseable {
     private final AtomicBoolean isClosed;
     private final java.util.Queue<QueuedChunk> waitingQueue;
     private final AtomicInteger queueSize;
+    private final boolean isSharedPool;
     
     // Configuration
     private final int loadThreads;
@@ -88,6 +89,61 @@ public class ChunkBatchLoader implements AutoCloseable {
      * @param maxConcurrentLoads Maximum concurrent loading operations
      * @throws IOException if file cannot be opened
      */
+    /**
+     * Create a new batch loader with shared executors.
+     * 
+     * @param regionPath Path to the LRF region file
+     * @param loadExecutor Shared I/O executor
+     * @param decompressionExecutor Shared decompression executor
+     * @param maxBatchSize Maximum chunks per batch
+     * @param maxConcurrentLoads Maximum concurrent loading operations
+     * @throws IOException if file cannot be opened
+     */
+    public ChunkBatchLoader(Path regionPath, ExecutorService loadExecutor, 
+                           ExecutorService decompressionExecutor,
+                           int maxBatchSize, int maxConcurrentLoads) throws IOException {
+        this.regionPath = regionPath;
+        this.loadExecutor = loadExecutor;
+        this.decompressionExecutor = decompressionExecutor;
+        this.maxBatchSize = maxBatchSize;
+        this.maxConcurrentLoads = maxConcurrentLoads;
+        this.readerRefreshIntervalMs = 60000; // 1 minute
+        
+        this.loadThreads = -1; // Not used with shared executor
+        this.decompressionThreads = -1; // Not used with shared executor
+        
+        this.loadingChunks = new ConcurrentHashMap<>();
+        this.isClosed = new AtomicBoolean(false);
+        this.waitingQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
+        this.queueSize = new AtomicInteger(0);
+        this.isSharedPool = true;
+        this.chunksLoaded = new AtomicInteger(0);
+        this.chunksDecompressed = new AtomicInteger(0);
+        this.cacheHits = new AtomicInteger(0);
+        this.cacheMisses = new AtomicInteger(0);
+        this.totalLoadTime = new AtomicLong(0);
+        this.totalDecompressionTime = new AtomicLong(0);
+        this.lastReaderRefresh = System.currentTimeMillis();
+        
+        // Initialize file modification time
+        try {
+            this.lastFileModified = java.nio.file.Files.getLastModifiedTime(regionPath).toMillis();
+        } catch (IOException e) {
+            this.lastFileModified = 0;
+        }
+        
+        // Initialize region reader
+        refreshRegionReader();
+        
+        System.out.println("[TurboMC] ChunkBatchLoader initialized (SharedPools): " + regionPath.getFileName() +
+                         " (batch size: " + maxBatchSize +
+                         ", concurrent loads: " + maxConcurrentLoads + ")");
+    }
+    
+    /**
+     * @deprecated Use constructor with shared executors
+     */
+    @Deprecated
     public ChunkBatchLoader(Path regionPath, int loadThreads, int decompressionThreads,
                            int maxBatchSize, int maxConcurrentLoads) throws IOException {
         this.regionPath = regionPath;
@@ -113,6 +169,7 @@ public class ChunkBatchLoader implements AutoCloseable {
         this.isClosed = new AtomicBoolean(false);
         this.waitingQueue = new java.util.concurrent.ConcurrentLinkedQueue<>();
         this.queueSize = new AtomicInteger(0);
+        this.isSharedPool = false;
         this.chunksLoaded = new AtomicInteger(0);
         this.chunksDecompressed = new AtomicInteger(0);
         this.cacheHits = new AtomicInteger(0);
@@ -130,12 +187,6 @@ public class ChunkBatchLoader implements AutoCloseable {
         
         // Initialize region reader
         refreshRegionReader();
-        
-        System.out.println("[TurboMC] ChunkBatchLoader initialized: " + regionPath.getFileName() +
-                         " (load threads: " + loadThreads +
-                         ", decompress threads: " + decompressionThreads +
-                         ", batch size: " + maxBatchSize +
-                         ", concurrent loads: " + maxConcurrentLoads + ")");
     }
     
     /**
@@ -423,16 +474,18 @@ public class ChunkBatchLoader implements AutoCloseable {
                 // Wait for pending operations
                 awaitCompletion(30, TimeUnit.SECONDS);
                 
-                // Shutdown executors
-                loadExecutor.shutdown();
-                decompressionExecutor.shutdown();
-                
-                if (!loadExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
-                    loadExecutor.shutdownNow();
-                }
-                
-                if (!decompressionExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
-                    decompressionExecutor.shutdownNow();
+                // Shutdown executors only if not shared
+                if (!isSharedPool) {
+                    loadExecutor.shutdown();
+                    decompressionExecutor.shutdown();
+                    
+                    if (!loadExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+                        loadExecutor.shutdownNow();
+                    }
+                    
+                    if (!decompressionExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+                        decompressionExecutor.shutdownNow();
+                    }
                 }
                 
                 // Close region reader

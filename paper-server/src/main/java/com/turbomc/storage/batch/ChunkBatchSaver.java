@@ -45,6 +45,7 @@ public class ChunkBatchSaver implements AutoCloseable {
     private final AtomicInteger chunksCompressed;
     private final ConcurrentHashMap<Long, LRFChunkEntry> inflightChunks;
     private final long startTime;
+    private final boolean isSharedPool;
     
     // Configuration
     private final int compressionThreads;
@@ -64,7 +65,8 @@ public class ChunkBatchSaver implements AutoCloseable {
         this(regionPath, compressionType, 
              Runtime.getRuntime().availableProcessors() / 2,
              1, // Force single writer thread per region to prevent corruption
-             64);
+             64, 
+             100L); // Default 100ms delay
     }
     
     /**
@@ -76,30 +78,55 @@ public class ChunkBatchSaver implements AutoCloseable {
      * @param writeThreads Number of write threads
      * @param batchSize Maximum chunks per batch
      */
+    /**
+     * Create a new batch saver with shared executors.
+     * 
+     * @param regionPath Path to the LRF region file
+     * @param compressionType Compression algorithm to use
+     * @param compressionExecutor Shared compression executor
+     * @param writeExecutor Shared write executor
+     * @param batchSize Maximum chunks per batch
+     */
     public ChunkBatchSaver(Path regionPath, int compressionType, 
-                          int compressionThreads, int writeThreads, int batchSize) {
-        this(regionPath, compressionType, compressionThreads, writeThreads, batchSize, 100); // 100ms default delay
+                          ExecutorService compressionExecutor, ExecutorService writeExecutor, int batchSize) {
+        this.regionPath = regionPath;
+        this.compressionType = compressionType;
+        this.compressionExecutor = compressionExecutor;
+        this.writeExecutor = writeExecutor;
+        this.batchSize = batchSize;
+        this.compressionThreads = -1; // Shared pool
+        this.writeThreads = -1;       // Shared pool
+        this.autoFlushDelayMs = 100; // Default 100ms
+        this.lastFlushTime = System.currentTimeMillis();
+        this.isSharedPool = true;
+        
+        this.pendingChunks = new ArrayList<>(batchSize);
+        this.chunkFutures = new ArrayList<>();
+        this.isClosed = new AtomicBoolean(false);
+        this.chunksSaved = new AtomicInteger(0);
+        this.chunksCompressed = new AtomicInteger(0);
+        this.inflightChunks = new ConcurrentHashMap<>();
+        this.startTime = System.currentTimeMillis();
+        
+        System.out.println("[TurboMC] ChunkBatchSaver initialized (SharedPools): " + regionPath.getFileName() +
+                         " (compression: " + LRFConstants.getCompressionName(compressionType) +
+                         ", batch size: " + batchSize + ")");
     }
     
     /**
      * Create a new batch saver with custom configuration including auto-flush delay.
-     * 
-     * @param regionPath Path to the LRF region file
-     * @param compressionType Compression algorithm to use
-     * @param compressionThreads Number of compression threads
-     * @param writeThreads Number of write threads
-     * @param batchSize Maximum chunks per batch
-     * @param autoFlushDelayMs Delay before auto-flush when batch is full
+     * @deprecated Use constructor with shared executors
      */
+    @Deprecated
     public ChunkBatchSaver(Path regionPath, int compressionType, 
                           int compressionThreads, int writeThreads, int batchSize, long autoFlushDelayMs) {
         this.regionPath = regionPath;
         this.compressionType = compressionType;
-        this.compressionThreads = compressionThreads;
-        this.writeThreads = writeThreads;
         this.batchSize = batchSize;
         this.autoFlushDelayMs = autoFlushDelayMs;
         this.lastFlushTime = System.currentTimeMillis();
+        this.compressionThreads = compressionThreads;
+        this.writeThreads = writeThreads;
         
         this.compressionExecutor = Executors.newFixedThreadPool(compressionThreads, r -> {
             Thread t = new Thread(r, "ChunkBatchSaver-Compression-" + System.currentTimeMillis());
@@ -120,11 +147,7 @@ public class ChunkBatchSaver implements AutoCloseable {
         this.chunksCompressed = new AtomicInteger(0);
         this.inflightChunks = new ConcurrentHashMap<>();
         this.startTime = System.currentTimeMillis();
-        
-        System.out.println("[TurboMC] ChunkBatchSaver initialized: " + regionPath.getFileName() +
-                         " (compression: " + LRFConstants.getCompressionName(compressionType) +
-                         ", threads: " + compressionThreads + "+" + writeThreads +
-                         ", batch size: " + batchSize + ")");
+        this.isSharedPool = false;
     }
     
     /**
@@ -375,16 +398,18 @@ public class ChunkBatchSaver implements AutoCloseable {
                 // Flush remaining chunks
                 flushBatch().get(30, TimeUnit.SECONDS);
                 
-                // Shutdown executors
-                compressionExecutor.shutdown();
-                writeExecutor.shutdown();
-                
-                if (!compressionExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
-                    compressionExecutor.shutdownNow();
-                }
-                
-                if (!writeExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
-                    writeExecutor.shutdownNow();
+                // Shutdown executors only if not shared
+                if (!isSharedPool) {
+                    compressionExecutor.shutdown();
+                    writeExecutor.shutdown();
+                    
+                    if (!compressionExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+                        compressionExecutor.shutdownNow();
+                    }
+                    
+                    if (!writeExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+                        writeExecutor.shutdownNow();
+                    }
                 }
                 
                 System.out.println("[TurboMC] ChunkBatchSaver closed: " + getStats());

@@ -13,6 +13,7 @@ import com.turbomc.storage.lrf.LRFRegionWriter;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -50,6 +51,12 @@ public class TurboStorageManager implements AutoCloseable {
     private final boolean mmapEnabled;
     private final boolean integrityEnabled;
     
+    // Global shared executors to prevent thread explosion per region
+    private ExecutorService globalLoadExecutor;
+    private ExecutorService globalWriteExecutor;
+    private ExecutorService globalCompressionExecutor;
+    private ExecutorService globalDecompressionExecutor;
+    
     private TurboStorageManager(TurboConfig config) {
         this.config = config;
         this.batchLoaders = new ConcurrentHashMap<>();
@@ -58,6 +65,29 @@ public class TurboStorageManager implements AutoCloseable {
         this.integrityValidators = new ConcurrentHashMap<>();
         this.isInitialized = new AtomicBoolean(false);
         this.isClosed = new AtomicBoolean(false);
+        
+        // Initialize global executors if batching is enabled
+        if (config.getBoolean("storage.batch.enabled", true)) {
+            int processors = Runtime.getRuntime().availableProcessors();
+            
+            // Scalable thread pool sizes
+            int loadThreads = config.getInt("storage.batch.global-load-threads", Math.max(2, processors / 4));
+            int writeThreads = config.getInt("storage.batch.global-save-threads", Math.max(1, processors / 8));
+            int compressionThreads = config.getInt("storage.batch.global-compression-threads", Math.max(2, processors / 2));
+            int decompressionThreads = config.getInt("storage.batch.global-decompression-threads", Math.max(2, processors / 2));
+            
+            this.globalLoadExecutor = java.util.concurrent.Executors.newFixedThreadPool(loadThreads, 
+                r -> new Thread(r, "Turbo-Global-LoadPool"));
+            this.globalWriteExecutor = java.util.concurrent.Executors.newFixedThreadPool(writeThreads, 
+                r -> new Thread(r, "Turbo-Global-WritePool"));
+            this.globalCompressionExecutor = java.util.concurrent.Executors.newFixedThreadPool(compressionThreads, 
+                r -> new Thread(r, "Turbo-Global-CompressionPool"));
+            this.globalDecompressionExecutor = java.util.concurrent.Executors.newFixedThreadPool(decompressionThreads, 
+                r -> new Thread(r, "Turbo-Global-DecompressionPool"));
+                
+            System.out.println("[TurboMC][Storage] Global thread pools initialized (" + 
+                loadThreads + "L, " + writeThreads + "W, " + compressionThreads + "C, " + decompressionThreads + "D)");
+        }
         
         // Load feature flags from configuration
         this.batchEnabled = config.getBoolean("storage.batch.enabled", true);
@@ -351,12 +381,11 @@ public class TurboStorageManager implements AutoCloseable {
         
         return batchLoaders.computeIfAbsent(regionPath, path -> {
             try {
-                int loadThreads = config.getInt("storage.batch.load-threads", 4);
-                int decompressionThreads = Math.max(1, loadThreads / 2);
                 int batchSize = config.getInt("storage.batch.batch-size", 32);
                 int maxConcurrentLoads = config.getInt("storage.batch.max-concurrent-loads", 64);
                 
-                return new ChunkBatchLoader(path, loadThreads, decompressionThreads, 
+                // Use global shared executors
+                return new ChunkBatchLoader(path, globalLoadExecutor, globalDecompressionExecutor,
                                            batchSize, maxConcurrentLoads);
             } catch (IOException e) {
                 System.err.println("[TurboMC][Storage] Failed to create batch loader for " + path + ": " + e.getMessage());
@@ -372,13 +401,12 @@ public class TurboStorageManager implements AutoCloseable {
         if (!batchEnabled) return null;
         
         return batchSavers.computeIfAbsent(regionPath, path -> {
-            int saveThreads = config.getInt("storage.batch.save-threads", 2);
-            int compressionThreads = Math.max(1, saveThreads / 2);
             int batchSize = config.getInt("storage.batch.batch-size", 32);
             int compressionType = LRFConstants.COMPRESSION_LZ4; // Default to LZ4
             
-            return new ChunkBatchSaver(path, compressionType, compressionThreads, 
-                                     saveThreads, batchSize);
+            // Use global shared executors
+            return new ChunkBatchSaver(path, compressionType, globalCompressionExecutor, 
+                                     globalWriteExecutor, batchSize);
         });
     }
     
@@ -567,8 +595,27 @@ public class TurboStorageManager implements AutoCloseable {
             readAheadEngines.clear();
             integrityValidators.clear();
             
+            // Shut down global executors
+            shutdownExecutor(globalLoadExecutor, "LoadPool");
+            shutdownExecutor(globalWriteExecutor, "WritePool");
+            shutdownExecutor(globalCompressionExecutor, "CompressionPool");
+            shutdownExecutor(globalDecompressionExecutor, "DecompressionPool");
+            
             System.out.println("[TurboMC][Storage] Final stats: " + getStats());
             System.out.println("[TurboMC][Storage] Storage manager shutdown complete.");
+        }
+    }
+    
+    private void shutdownExecutor(ExecutorService executor, String name) {
+        if (executor == null) return;
+        try {
+            executor.shutdown();
+            if (!executor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
     
