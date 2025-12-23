@@ -34,6 +34,9 @@ public final class TurboCommandRegistry {
         // Register storage management commands
         TurboStorageCommand.register(dispatcher);
         
+        // Register inspector commands
+        TurboInspectorCommand.register(dispatcher);
+        
         // Future commands can be registered here
         // TurboPerformanceCommand.register(dispatcher);
         // TurboConfigCommand.register(dispatcher);
@@ -45,8 +48,8 @@ public final class TurboCommandRegistry {
      * Get the number of registered commands.
      */
     public static int getCommandCount() {
-        // Currently only storage commands are registered
-        return 1;
+        // Storage and inspector commands are registered
+        return 2;
     }
     
     /**
@@ -54,7 +57,8 @@ public final class TurboCommandRegistry {
      */
     public static String[] getRegisteredCommands() {
         return new String[]{
-            "turbo storage"
+            "turbo storage",
+            "turbo inspect"
         };
     }
     
@@ -74,40 +78,83 @@ public final class TurboCommandRegistry {
                     return true;
                 }
                 
-                if (args.length == 0 || !args[0].equals("storage")) {
+                if (args.length == 0 || (!args[0].equals("storage") && !args[0].equals("inspect"))) {
                     sender.sendMessage("§6=== TurboMC Commands ===");
                     sender.sendMessage("§e/turbo storage stats §7- Show storage statistics");
                     sender.sendMessage("§e/turbo storage convert §7- Convert MCA files to LRF format");
                     sender.sendMessage("§e/turbo storage info §7- Show storage information");
                     sender.sendMessage("§e/turbo storage reload §7- Reload storage configuration");
+                    sender.sendMessage("§e/turbo inspect hex <file> §7- Hex viewer for LRF files");
+                    sender.sendMessage("§e/turbo inspect png <file> §7- Export region to PNG");
+                    sender.sendMessage("§e/turbo inspect tree <file> §7- Chunk tree structure");
+                    sender.sendMessage("§e/turbo inspect stats <file> §7- Compression statistics");
                     return true;
                 }
                 
-                // Handle storage subcommands
+                // Handle storage or inspect subcommands
                 if (args.length == 1) {
-                    sendStorageUsage(sender);
+                    if (args[0].equals("storage")) {
+                        sendStorageUsage(sender);
+                    } else if (args[0].equals("inspect")) {
+                        sendInspectUsage(sender);
+                    }
                     return true;
                 }
                 
-                String subCommand = args[1].toLowerCase();
-                switch (subCommand) {
-                    case "stats":
-                        handleStorageStats(sender);
-                        return true;
-                    case "convert":
-                        sender.sendMessage("§6=== TurboMC Storage Conversion ===");
-                        sender.sendMessage("§eUse §e/lrfrepair convert §7for LRF conversion operations");
-                        return true;
-                    case "info":
-                        handleStorageInfo(sender);
-                        return true;
-                    case "reload":
-                        handleStorageReload(sender);
-                        return true;
-                    default:
-                        sendStorageUsage(sender);
-                        return true;
+                // Handle storage commands
+                if (args[0].equals("storage")) {
+                    String subCommand = args[1].toLowerCase();
+                    switch (subCommand) {
+                        case "stats":
+                            handleStorageStats(sender);
+                            return true;
+                        case "convert":
+                            sender.sendMessage("§6=== TurboMC Storage Conversion ===");
+                            sender.sendMessage("§eUse §e/lrfrepair convert §7for LRF conversion operations");
+                            return true;
+                        case "info":
+                            handleStorageInfo(sender);
+                            return true;
+                        case "reload":
+                            handleStorageReload(sender);
+                            return true;
+                        default:
+                            sendStorageUsage(sender);
+                            return true;
+                    }
                 }
+                
+                // Handle inspect commands
+                if (args[0].equals("inspect")) {
+                    if (args.length < 3) {
+                        sendInspectUsage(sender);
+                        return true;
+                    }
+                    
+                    String inspectType = args[1].toLowerCase();
+                    String fileName = args[2];
+                    
+                    switch (inspectType) {
+                        case "hex":
+                            handleInspectHex(sender, fileName);
+                            return true;
+                        case "png":
+                            handleInspectPng(sender, fileName);
+                            return true;
+                        case "tree":
+                            handleInspectTree(sender, fileName);
+                            return true;
+                        case "stats":
+                            handleInspectStats(sender, fileName);
+                            return true;
+                        default:
+                            sendInspectUsage(sender);
+                            return true;
+                    }
+                }
+                
+                // Default case - should not reach here
+                return false;
             }
             
             @Override
@@ -117,11 +164,20 @@ public final class TurboCommandRegistry {
                 }
                 
                 if (args.length == 1) {
-                    return Arrays.asList("storage");
+                    return Arrays.asList("storage", "inspect");
                 }
                 
-                if (args.length == 2 && args[0].equals("storage")) {
-                    return Arrays.asList("stats", "convert", "info", "reload");
+                if (args.length == 2) {
+                    if (args[0].equals("storage")) {
+                        return Arrays.asList("stats", "convert", "info", "reload");
+                    } else if (args[0].equals("inspect")) {
+                        return Arrays.asList("hex", "png", "tree", "stats");
+                    }
+                }
+                
+                if (args.length == 3 && args[0].equals("inspect")) {
+                    // Suggest common LRF files
+                    return Arrays.asList("r.0.0.lrf", "r.0.-1.lrf", "r.1.0.lrf", "r.-1.0.lrf");
                 }
                 
                 return Arrays.asList();
@@ -242,6 +298,138 @@ public final class TurboCommandRegistry {
         } catch (Exception e) {
             sender.sendMessage("§c[TurboMC] Failed to reload configuration: " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+    
+    private static void sendInspectUsage(CommandSender sender) {
+        sender.sendMessage("§6=== TurboMC Inspector Commands ===");
+        sender.sendMessage("§e/turbo inspect hex <file> §7- Hex viewer for LRF files");
+        sender.sendMessage("§e/turbo inspect png <file> §7- Export region to PNG");
+        sender.sendMessage("§e/turbo inspect tree <file> §7- Chunk tree structure");
+        sender.sendMessage("§e/turbo inspect stats <file> §7- Compression statistics");
+        sender.sendMessage("§7Example: §e/turbo inspect hex r.0.0.lrf");
+    }
+    
+    private static void handleInspectHex(CommandSender sender, String fileName) {
+        sender.sendMessage("§6=== TurboMC Hex Viewer ===");
+        sender.sendMessage("§eAnalyzing file: §f" + fileName);
+        
+        try {
+            java.nio.file.Path filePath = java.nio.file.Paths.get("world/region/" + fileName);
+            if (!java.nio.file.Files.exists(filePath)) {
+                sender.sendMessage("§cFile not found: §f" + fileName);
+                return;
+            }
+            
+            com.turbomc.inspector.TurboHexViewer hexViewer = new com.turbomc.inspector.TurboHexViewer();
+            com.turbomc.storage.lrf.LRFRegionFileAdapter region = new com.turbomc.storage.lrf.LRFRegionFileAdapter(null, filePath);
+            
+            String hexDump = hexViewer.generateHexDump(region);
+            
+            // Send hex dump in chunks to avoid message length limits
+            String[] lines = hexDump.split("\n");
+            sender.sendMessage("§aHex dump generated (" + lines.length + " lines)");
+            sender.sendMessage("§7Showing first 20 lines:");
+            
+            for (int i = 0; i < Math.min(20, lines.length); i++) {
+                sender.sendMessage("§f" + lines[i]);
+            }
+            
+            if (lines.length > 20) {
+                sender.sendMessage("§7... and " + (lines.length - 20) + " more lines");
+                sender.sendMessage("§eUse console for complete output");
+            }
+            
+        } catch (Exception e) {
+            sender.sendMessage("§cError analyzing file: " + e.getMessage());
+        }
+    }
+    
+    private static void handleInspectPng(CommandSender sender, String fileName) {
+        sender.sendMessage("§6=== TurboMC PNG Exporter ===");
+        sender.sendMessage("§eExporting region: §f" + fileName);
+        
+        try {
+            java.nio.file.Path filePath = java.nio.file.Paths.get("world/region/" + fileName);
+            if (!java.nio.file.Files.exists(filePath)) {
+                sender.sendMessage("§cFile not found: §f" + fileName);
+                return;
+            }
+            
+            com.turbomc.inspector.TurboPNGExporter pngExporter = new com.turbomc.inspector.TurboPNGExporter();
+            com.turbomc.storage.lrf.LRFRegionFileAdapter region = new com.turbomc.storage.lrf.LRFRegionFileAdapter(null, filePath);
+            
+            String outputPath = "turbo_inspector_" + fileName.replace(".lrf", ".png");
+            pngExporter.exportTopDownView(region, outputPath, 2);
+            
+            sender.sendMessage("§aPNG exported successfully: §f" + outputPath);
+            sender.sendMessage("§eScale: 1:2, Size: 512x512 pixels");
+            
+        } catch (Exception e) {
+            sender.sendMessage("§cError exporting PNG: " + e.getMessage());
+        }
+    }
+    
+    private static void handleInspectTree(CommandSender sender, String fileName) {
+        sender.sendMessage("§6=== TurboMC Chunk Tree Viewer ===");
+        sender.sendMessage("§eAnalyzing file: §f" + fileName);
+        
+        try {
+            java.nio.file.Path filePath = java.nio.file.Paths.get("world/region/" + fileName);
+            if (!java.nio.file.Files.exists(filePath)) {
+                sender.sendMessage("§cFile not found: §f" + fileName);
+                return;
+            }
+            
+            com.turbomc.inspector.TurboChunkTreeView treeView = new com.turbomc.inspector.TurboChunkTreeView();
+            com.turbomc.storage.lrf.LRFRegionFileAdapter region = new com.turbomc.storage.lrf.LRFRegionFileAdapter(null, filePath);
+            
+            java.util.Map<String, Object> tree = treeView.generateChunkTree(region);
+            
+            sender.sendMessage("§aChunk tree generated successfully");
+            sender.sendMessage("§7Region info:");
+            sender.sendMessage("§f  File: " + tree.get("region"));
+            sender.sendMessage("§f  Chunks: " + ((java.util.Map<?, ?>)tree.get("region")).get("chunks"));
+            sender.sendMessage("§f  Format: " + ((java.util.Map<?, ?>)tree.get("region")).get("format"));
+            
+            java.util.List<?> chunks = (java.util.List<?>) tree.get("chunks");
+            sender.sendMessage("§f  Analyzed chunks: " + chunks.size());
+            
+        } catch (Exception e) {
+            sender.sendMessage("§cError generating tree: " + e.getMessage());
+        }
+    }
+    
+    private static void handleInspectStats(CommandSender sender, String fileName) {
+        sender.sendMessage("§6=== TurboMC Compression Statistics ===");
+        sender.sendMessage("§eAnalyzing file: §f" + fileName);
+        
+        try {
+            java.nio.file.Path filePath = java.nio.file.Paths.get("world/region/" + fileName);
+            if (!java.nio.file.Files.exists(filePath)) {
+                sender.sendMessage("§cFile not found: §f" + fileName);
+                return;
+            }
+            
+            com.turbomc.inspector.TurboCompressionStats stats = new com.turbomc.inspector.TurboCompressionStats();
+            com.turbomc.storage.lrf.LRFRegionFileAdapter region = new com.turbomc.storage.lrf.LRFRegionFileAdapter(null, filePath);
+            
+            double compressionRatio = stats.calculateCompressionRatio(region);
+            com.turbomc.inspector.TurboCompressionStats.CompressionStatistics detailedStats = stats.generateDetailedStats(region);
+            
+            sender.sendMessage("§aCompression statistics generated");
+            sender.sendMessage("§7Overall compression ratio: §f" + String.format("%.2f%%", compressionRatio * 100));
+            sender.sendMessage("§7Total chunks: §f" + detailedStats.totalChunks);
+            sender.sendMessage("§7Total compressed size: §f" + detailedStats.totalCompressedSize + " bytes");
+            sender.sendMessage("§7Total uncompressed size: §f" + detailedStats.totalUncompressedSize + " bytes");
+            
+            sender.sendMessage("§7Compression algorithms:");
+            for (var entry : detailedStats.algorithmStats.entrySet()) {
+                sender.sendMessage("§f  " + entry.getKey() + ": §a" + entry.getValue().chunkCount + " chunks");
+            }
+            
+        } catch (Exception e) {
+            sender.sendMessage("§cError generating statistics: " + e.getMessage());
         }
     }
 }

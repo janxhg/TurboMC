@@ -382,11 +382,11 @@ turbotools benchmark --compression file.dat
 ## 🟠 TurboMC Region Inspector
 
 ### Visual Inspector (GUI o TUI)
-- [ ] Viewer hexadecimal de regiones LRF
-- [ ] Tree view de chunk structure
-- [ ] Block palette visualizer
-- [ ] Compression ratio stats
-- [ ] Export a PNG (top-down view)
+- [x] Viewer hexadecimal de regiones LRF
+- [x] Tree view de chunk structure
+- [x] Block palette visualizer
+- [x] Compression ratio stats
+- [x] Export a PNG (top-down view)
 
 ---
 

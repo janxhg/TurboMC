@@ -264,6 +264,90 @@ public class LRFRegionFileAdapter extends RegionFile {
         return header.hasChunk(chunkPos.x & 31, chunkPos.z & 31);
     }
     
+    /**
+     * Get chunk entry for inspection purposes.
+     */
+    public LRFChunkEntry getChunk(int chunkX, int chunkZ) throws IOException {
+        int localX = chunkX & 31;
+        int localZ = chunkZ & 31;
+        
+        if (!header.hasChunk(localX, localZ)) {
+            return null;
+        }
+        
+        long offset = header.getChunkOffset(localX, localZ);
+        int size = header.getChunkSize(localX, localZ);
+        
+        if (offset + size > channel.size()) {
+            return null;
+        }
+        
+        ByteBuffer buffer = ByteBuffer.allocate(size);
+        channel.read(buffer, offset);
+        buffer.flip();
+        byte[] bucket = buffer.array();
+        
+        // Read 4-byte length header
+        if (bucket.length < 4) return null;
+        int exactLength = ((bucket[0] & 0xFF) << 24) | ((bucket[1] & 0xFF) << 16) | ((bucket[2] & 0xFF) << 8) | (bucket[3] & 0xFF);
+        
+        if (exactLength <= 0 || exactLength > bucket.length - 4) {
+            return null;
+        }
+        
+        // LRF stores timestamp at end of chunk data
+        if (exactLength < 8) return null;
+        
+        int payloadSize = exactLength - 8;
+        byte[] payload = new byte[payloadSize];
+        System.arraycopy(bucket, 4, payload, 0, payloadSize);
+        
+        // Extract timestamp from end of data
+        long timestamp = 0;
+        if (bucket.length >= 8) {
+            int tsOffset = 4 + exactLength - 8;
+            timestamp = ((long) bucket[tsOffset] & 0xFF) << 56 |
+                       ((long) bucket[tsOffset + 1] & 0xFF) << 48 |
+                       ((long) bucket[tsOffset + 2] & 0xFF) << 40 |
+                       ((long) bucket[tsOffset + 3] & 0xFF) << 32 |
+                       ((long) bucket[tsOffset + 4] & 0xFF) << 24 |
+                       ((long) bucket[tsOffset + 5] & 0xFF) << 16 |
+                       ((long) bucket[tsOffset + 6] & 0xFF) << 8 |
+                       ((long) bucket[tsOffset + 7] & 0xFF);
+        }
+        
+        return new LRFChunkEntry(chunkX, chunkZ, payload, timestamp);
+    }
+    
+    /**
+     * Get total chunk count in region.
+     */
+    public int getChunkCount() {
+        int count = 0;
+        for (int x = 0; x < 32; x++) {
+            for (int z = 0; z < 32; z++) {
+                if (header.hasChunk(x, z)) {
+                    count++;
+                }
+            }
+        }
+        return count;
+    }
+    
+    /**
+     * Get LRF header.
+     */
+    public LRFHeader getHeader() {
+        return header;
+    }
+    
+    /**
+     * Get file path.
+     */
+    public Path getFile() {
+        return filePath;
+    }
+    
     // Override other public methods if necessary...
     // boolean isOversized(...) - LRF supports large chunks natively (int size), so no oversized needed separately?
     // We should probably report false for oversized to standard checks.

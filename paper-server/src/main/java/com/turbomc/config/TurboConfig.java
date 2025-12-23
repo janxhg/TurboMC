@@ -179,16 +179,16 @@ public class TurboConfig {
                 adjustment-interval-ticks = 1200
                 
                 # Enable automatic quality adjustments based on performance
-                auto-adjust.enabled = true
+                auto_adjust_enabled = true
                 
                 # Default quality preset: LOW, MEDIUM, HIGH, ULTRA, DYNAMIC
                 default-preset = "HIGH"
                 
                 # Entity culling optimization
-                entity-culling.enabled = true
+                entity_culling_enabled = true
                 
                 # Particle effect optimization
-                particle-optimization.enabled = true
+                particle_optimization_enabled = true
                 
                 [fps]
                 # FPS optimization settings
@@ -202,19 +202,19 @@ public class TurboConfig {
                 optimization-interval-ticks = 100
                 
                 # Redstone optimization
-                redstone-optimization.enabled = true
+                redstone_optimization_enabled = true
                 
                 # Entity activation range optimization
-                entity-optimization.enabled = true
+                entity_optimization_enabled = true
                 
                 # Hopper optimization
-                hopper-optimization.enabled = true
+                hopper_optimization_enabled = true
                 
                 # Mob spawning optimization
-                mob-spawning-optimization.enabled = true
+                mob_spawning_optimization_enabled = true
                 
                 # Chunk ticking optimization
-                chunk-ticking-optimization.enabled = true
+                chunk_ticking_optimization_enabled = true
                 
                 # Default optimization mode: CONSERVATIVE, BALANCED, PERFORMANCE, EXTREME, ADAPTIVE
                 default-mode = "BALANCED"
@@ -222,16 +222,16 @@ public class TurboConfig {
                 [chunk]
                 # Chunk loading optimization settings
                 # Enable intelligent chunk preloading
-                preloading.enabled = true
+                preloading_enabled = true
                 
                 # Enable parallel chunk generation
-                parallel-generation.enabled = true
+                parallel_generation_enabled = true
                 
                 # Enable chunk caching
-                caching.enabled = true
+                caching_enabled = true
                 
                 # Enable priority-based loading
-                priority-loading.enabled = true
+                priority_loading_enabled = true
                 
                 # Maximum memory usage for chunk caching (in MB)
                 max-memory-usage-mb = 512
@@ -251,6 +251,61 @@ public class TurboConfig {
                 
                 # List of specific versions to block (e.g., ["1.20.3", "1.20.4"])
                 blocked-versions = []
+                
+                [web-viewer]
+                # TurboMC Web Viewer Configuration
+                # Interactive map viewer for world inspection and chunk analysis
+                
+                # Enable/disable web viewer
+                enabled = true
+                
+                # Web server port (default: 8080)
+                port = 8080
+                
+                # Host interface (0.0.0.0 for all interfaces, localhost for local only)
+                host = "0.0.0.0"
+                
+                # Maximum concurrent connections
+                max-connections = 50
+                
+                # Cache size in MB
+                cache-size-mb = 64
+                
+                # Auto-refresh interval in seconds (0 = disabled)
+                auto-refresh-interval-seconds = 30
+                
+                [web-viewer.map-display]
+                # Map display settings
+                
+                # Default zoom level (0.1 = far, 5.0 = close)
+                default-zoom = 1.0
+                
+                # Maximum zoom level
+                max-zoom = 5.0
+                
+                # Minimum zoom level
+                min-zoom = 0.1
+                
+                # Chunk size in pixels at zoom 1.0
+                chunk-pixel-size = 16
+                
+                # Show chunk boundaries
+                show_chunk_boundaries = true
+                
+                # Show region boundaries
+                show_region_boundaries = true
+                
+                # Show coordinate grid
+                show_coordinate_grid = true
+                
+                [web-viewer.chunk-analysis]
+                # Chunk analysis and corruption detection
+                
+                # Enable chunk corruption detection
+                corruption-detection = true
+                
+                # Highlight corrupted chunks
+                highlight-corrupted = true
                 """;
             
             Files.writeString(configFile.toPath(), defaultConfig);
@@ -532,6 +587,8 @@ public class TurboConfig {
         return new TurboStorageConfig(format, autoMigrate);
     }
     
+        
+        
     /**
      * Run world region migration if auto-convert is enabled.
      * Should be called during server startup before worlds are loaded.

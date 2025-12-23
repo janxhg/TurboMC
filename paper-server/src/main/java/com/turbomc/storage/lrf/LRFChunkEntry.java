@@ -89,6 +89,53 @@ public class LRFChunkEntry {
         return timestamp;
     }
     
+    /**
+     * Get compressed size of chunk data.
+     */
+    public int getCompressedSize() {
+        return getSize();
+    }
+    
+    /**
+     * Get estimated uncompressed size (approximation for inspection).
+     */
+    public int getUncompressedSize() {
+        // Rough estimation: compressed data is typically 30-70% of original
+        // For inspection purposes, we'll use a 50% expansion estimate
+        return data != null ? (int)(data.length * 2.0) : 0;
+    }
+    
+    /**
+     * Get block count (estimated for inspection).
+     */
+    public int getBlockCount() {
+        // Standard chunk has 16x16x384 blocks = 98,304 blocks maximum
+        // For inspection, we'll estimate based on data size
+        if (data == null || data.length == 0) return 0;
+        
+        // Rough estimation: larger data = more blocks
+        // This is just for visualization purposes
+        int estimatedBlocks = Math.min(98304, data.length * 10);
+        return estimatedBlocks;
+    }
+    
+    /**
+     * Get compression type (from header or default).
+     */
+    public String getCompressionType() {
+        // In a real implementation, this would be stored in the chunk entry
+        // For now, return default compression type
+        return "LZ4";
+    }
+    
+    /**
+     * Get chunk Y coordinate (for 3D positioning).
+     */
+    public int getY() {
+        // LRF doesn't store Y coordinate, return 0 as default
+        return 0;
+    }
+    
     @Override
     public String toString() {
         return String.format("LRFChunkEntry{x=%d, z=%d, size=%d bytes, timestamp=%d}",

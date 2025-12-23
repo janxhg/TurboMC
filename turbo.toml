@@ -1,192 +1,396 @@
-# TurboMC Configuration File
-# This file controls server-specific optimizations and features unique to TurboMC
+                # TurboMC Configuration File
+# Configuración optimizada para servidor de alto rendimiento
 
 [compression]
-# Compression algorithm: "zstd" (fastest/best), "lz4" (fast), or "zlib" (vanilla compatible)
-algorithm = "lz4"
+# Algoritmo de compresión: "zstd" (más rápido/mejor), "lz4" (rápido), o "zlib" (compatible vanilla)
+algorithm = "zstd"
 
-# Compression level
-# - For Zstd: 1-22 (3 is standard, 1 is ultra-fast)
-# - For LZ4: 1-17
-level = 17
+# Nivel de compresión
+# - Para Zstd: 1-22 (3 es estándar, 1 es ultra-rápido)
+# - Para LZ4: 1-17
+level = 3
 
-# Automatically migrate old zlib-compressed data to LZ4 format
+# Migrar automáticamente datos zlib antiguos a formato ZSTD
 auto-migrate = true
 
-# Enable fallback to zlib if LZ4 decompression fails
+# Habilitar fallback a zlib si falla la descompresión ZSTD
 fallback-enabled = true
 
 [storage]
-# Region file format: "auto" (detect), "lrf" (optimized), or "mca" (vanilla)
+# Formato de archivo de región: "auto" (detectar), "lrf" (optimizado), o "mca" (vanilla)
 format = "lrf"
 
-# Automatically convert MCA to LRF when loading chunks
+# Convertir automáticamente MCA a LRF al cargar chunks
 auto-convert = true
 
-# Conversion mode: "on-demand" (convert as chunks load), "background" (idle time), "full-lrf" (convert all at startup), or "manual"
-conversion-mode = "full-lrf"
+# Modo de conversión: "on-demand" (convertir según carga), "background" (tiempo inactivo), "full-lrf" (convertir todo al inicio), o "manual"
+conversion-mode = "on-demand"
 
-# Backup original MCA files before deletion
+# Hacer backup de archivos MCA originales antes de eliminar
 backup-original-mca = false
 
-# Batch operations configuration
+# Configuración de operaciones batch
 [storage.batch]
-# Enable batch chunk loading/saving
+# Habilitar carga/guardado batch de chunks
 enabled = true
 
-# Number of threads for batch loading operations
-load-threads = 4
+# Número de hilos para operaciones batch de carga
+load-threads = 8
 
-# Number of threads for batch saving operations
+# Número de hilos para operaciones batch de guardado  
 save-threads = 4
 
-# Maximum chunks per batch operation
+# Máximo de chunks por operación batch
 batch-size = 64
 
-# Maximum concurrent loading operations
-max-concurrent-loads = 32
+# Máximo de operaciones de carga concurrentes
+max-concurrent-loads = 64
 
-# Memory-mapped read-ahead engine
+# Motor de read-ahead con memory-mapped
 [storage.mmap]
-# Enable memory-mapped read-ahead for SSD/NVMe optimization
+# Habilitar read-ahead memory-mapped para optimización SSD/NVMe
 enabled = true
 
-# Maximum cache size in number of chunks
+# Tamaño máximo de caché en número de chunks
 max-cache-size = 1024
 
-# Prefetch distance in chunks from player position
+# Distancia de prefetch en chunks desde la posición del jugador
 prefetch-distance = 8
 
-# Prefetch batch size
+# Tamaño de batch de prefetch
 prefetch-batch-size = 32
 
-# Predictive/Kinematic Prefetching
-# Analyzes movement vectors to pre-load chunks in the direction of travel
+# Prefetching Predictivo/Cinemático
+# Analiza vectores de movimiento para pre-cargar chunks en dirección de viaje
 predictive-enabled = true
 
-# Prediction strength (how many chunks ahead to look)
+# Escala de predicción (cuántos chunks adelante buscar)
 prediction-scale = 6
 
-# Maximum memory usage for caching (in MB)
+# Uso máximo de memoria para caché (en MB)
 max-memory-usage = 512
 
-# Use Java 22+ Foreign Memory API if available
-use-foreign-memory-api = false
+# Usar Java 22+ Foreign Memory API si está disponible
+use-foreign-memory-api = true
 
-# Integrity validation system
+# Sistema de validación de integridad
 [storage.integrity]
-# Enable chunk integrity validation with checksums
+# Habilitar validación de integridad de chunks con checksums
 enabled = true
 
-# Primary checksum algorithm: "crc32", "crc32c", "sha256"
+# Algoritmo de checksum primario: "crc32", "crc32c", "sha256"
 primary-algorithm = "crc32c"
 
-# Backup checksum algorithm for verification (null to disable)
+# Algoritmo de checksum de respaldo para verificación (null para deshabilitar)
 backup-algorithm = "sha256"
 
-# Enable automatic repair from backups
+# Habilitar reparación automática desde backups
 auto-repair = true
 
-# Number of validation threads
+# Número de hilos de validación
 validation-threads = 2
 
-# Validation interval in milliseconds (5 minutes)
+# Intervalo de validación en milisegundos (5 minutos)
 validation-interval = 300000
 
 [quality]
-# Quality and rendering optimizations
-# Target TPS for quality adjustments
-tps-threshold = 18.0
+# Optimizaciones de calidad y renderizado
+# TPS objetivo para ajustes de calidad
+tps-threshold = 18
 
-# Memory usage threshold for quality adjustments (0.8 = 80%)
+# Umbral de uso de memoria para ajustes de calidad (0.8 = 80%)
 memory-threshold = 0.8
 
-# Adjustment interval in server ticks (1200 = 1 minute)
+# Intervalo de ajuste en ticks del servidor (1200 = 1 minuto)
 adjustment-interval-ticks = 1200
 
-# Default quality preset: LOW, MEDIUM, HIGH, ULTRA, DYNAMIC
+# Habilitar ajustes automáticos de calidad basados en rendimiento
+auto_adjust_enabled = true
+
+# Preset de calidad por defecto: LOW, MEDIUM, HIGH, ULTRA, DYNAMIC
 default-preset = "HIGH"
 
-    [quality.auto-adjust]
-    # Enable automatic quality adjustments based on performance
-    enabled = true
+# Optimización de entity culling
+entity_culling_enabled = true
 
-    [quality.entity-culling]
-    # Entity culling optimization
-    enabled = true
-
-    [quality.particle-optimization]
-    # Particle effect optimization
-    enabled = true
+# Optimización de efectos de partículas
+particle_optimization_enabled = true
 
 [fps]
-# FPS optimization settings
-# Target TPS for optimization
-target-tps = 20.0
+# Configuración de optimización FPS
+# TPS objetivo para optimización
+target-tps = 20
 
-# TPS tolerance for optimization adjustments (±0.5 TPS)
+# Tolerancia TPS para ajustes de optimización (±0.5 TPS)
 tps-tolerance = 0.5
 
-# Optimization check interval in ticks (100 = 5 seconds)
+# Intervalo de verificación de optimización en ticks (100 = 5 segundos)
 optimization-interval-ticks = 100
 
-# Default optimization mode: CONSERVATIVE, BALANCED, PERFORMANCE, EXTREME, ADAPTIVE
+# Optimización de redstone
+redstone_optimization_enabled = true
+
+# Optimización de rango de activación de entidades
+entity_optimization_enabled = true
+
+# Optimización de hoppers
+hopper_optimization_enabled = true
+
+# Optimización de spawn de mobs
+mob_spawning_optimization_enabled = true
+
+# Optimización de chunk ticking
+chunk_ticking_optimization_enabled = true
+
+# Modo de optimización por defecto: CONSERVATIVE, BALANCED, PERFORMANCE, EXTREME, ADAPTIVE
 default-mode = "BALANCED"
 
-    [fps.redstone-optimization]
-    # Redstone optimization
-    enabled = true
-
-    [fps.entity-optimization]
-    # Entity activation range optimization
-    enabled = true
-
-    [fps.hopper-optimization]
-    # Hopper optimization
-    enabled = true
-
-    [fps.mob-spawning-optimization]
-    # Mob spawning optimization
-    enabled = true
-
-    [fps.chunk-ticking-optimization]
-    # Chunk ticking optimization
-    enabled = true
-
 [chunk]
-# Chunk loading optimization settings
+# Configuración de optimización de carga de chunks
+# Habilitar precarga inteligente de chunks
+preloading_enabled = true
 
-# Maximum memory usage for chunk caching (in MB)
+# Habilitar generación paralela de chunks
+parallel_generation_enabled = true
+
+# Habilitar caché de chunks
+caching_enabled = true
+
+# Habilitar carga basada en prioridades
+priority_loading_enabled = true
+
+# Uso máximo de memoria para caché de chunks (en MB)
 max-memory-usage-mb = 512
 
-# Memory threshold for cache cleanup (0.8 = 80%)
+# Umbral de memoria para limpieza de caché (0.8 = 80%)
 memory-threshold = 0.8
 
-# Default loading strategy: CONSERVATIVE, BALANCED, AGGRESSIVE, EXTREME, ADAPTIVE
+# Estrategia de carga por defecto: CONSERVATIVE, BALANCED, AGGRESSIVE, EXTREME, ADAPTIVE
 default-strategy = "BALANCED"
 
-    [chunk.preloading]
-    # Enable intelligent chunk preloading
-    enabled = true
-
-    [chunk.parallel-generation]
-    # Enable parallel chunk generation
-    enabled = true
-
-    [chunk.caching]
-    # Enable chunk caching
-    enabled = true
-
-    [chunk.priority-loading]
-    # Enable priority-based loading
-    enabled = true
-
 [version-control]
-# Minimum Minecraft version allowed to connect (e.g., "1.20.1")
+# Versión mínima de Minecraft permitida para conectarse (ej: "1.20.1")
 minimum-version = "1.20.1"
 
-# Maximum Minecraft version allowed (usually server version)
+# Versión máxima de Minecraft permitida (usualmente versión del servidor)
 maximum-version = "1.21.10"
 
-# List of specific versions to block (e.g., ["1.20.3", "1.20.4"])
+# Lista de versiones específicas a bloquear (ej: ["1.20.3", "1.20.4"])
 blocked-versions = []
+
+[web-viewer]
+# Configuración de TurboMC Web Viewer
+# Visor de mapa interactivo para inspección de mundo y análisis de chunks
+
+# Habilitar/deshabilitar web viewer
+enabled = true
+
+# Puerto del servidor web (por defecto: 8080)
+port = 8080
+
+# Interfaz de host (0.0.0.0 para todas las interfaces, localhost solo local)
+host = "0.0.0.0"
+
+# Máximo de conexiones concurrentes
+max-connections = 50
+
+# Tamaño de caché en MB
+cache-size-mb = 64
+
+# Intervalo de auto-refresco en segundos (0 = deshabilitado)
+auto-refresh-interval-seconds = 30
+
+[web-viewer.map-display]
+# Configuración de visualización del mapa
+
+# Nivel de zoom por defecto (0.1 = lejos, 5.0 = cerca)
+default-zoom = 1.0
+
+# Nivel máximo de zoom
+max-zoom = 5.0
+
+# Nivel mínimo de zoom
+min-zoom = 0.1
+
+# Tamaño del chunk en píxeles al zoom 1.0
+chunk-pixel-size = 16
+
+# Mostrar límites de chunks
+show_chunk_boundaries = true
+
+# Mostrar límites de regiones
+show_region_boundaries = true
+
+# Mostrar cuadrícula de coordenadas
+show_coordinate_grid = true
+
+# Auto-centrar en chunks cargados
+auto_center_loaded_chunks = true
+
+[web-viewer.chunk-analysis]
+# Análisis de chunks y detección de corrupción
+
+# Habilitar detección de corrupción de chunks
+corruption-detection = true
+
+# Resaltar chunks corruptos
+highlight-corrupted = true
+
+# Habilitar análisis profundo de chunks
+deep-analysis-enabled = true
+
+# Intervalo de análisis en segundos (60 = 1 minuto)
+analysis-interval-seconds = 60
+
+[web-viewer.players]
+# Funcionalidades de jugadores
+
+# Mostrar posiciones de jugadores en tiempo real
+show_players = true
+
+# Permitir teletransporte mediante clics en mapa
+allow_teleport = true
+
+# Mostrar trails de jugadores
+show_player_trails = true
+
+# Intervalo de actualización de posiciones (segundos)
+position-update-interval = 5
+
+# Mostrar información detallada de jugadores
+show_player_details = true
+
+[web-viewer.admin]
+# Funcionalidades administrativas
+
+# Permitir ejecución de comandos desde interfaz web
+allow_command_execution = true
+
+# Permitir gestión de jugadores
+allow_player_management = true
+
+# Mostrar estadísticas del servidor
+show_server_stats = true
+
+# Permitir inspección de chunks
+allow_chunk_inspection = true
+
+# Permitir gestión de mundos
+allow_world_management = true
+
+[web-viewer.security]
+# Configuración de seguridad
+
+# Requerir autenticación para funciones administrativas
+require-auth = false
+
+# IPs permitidas (vacío = permitir todas)
+allowed-ips = []
+
+# IPs bloqueadas
+blocked-ips = []
+
+# Rate limiting (solicitudes por minuto por IP)
+rate-limit = 60
+
+# Habilitar CORS para desarrollo
+cors-enabled = true
+
+[web-viewer.performance]
+# Configuración de rendimiento
+
+# Máximo de chunks a renderizar simultáneamente
+max-chunks-render = 100
+
+# TTL de caché de datos de chunks (segundos)
+chunk-cache-ttl = 300
+
+# Habilitar carga lazy de chunks
+lazy-chunk-loading = true
+
+# Precargar chunks alrededor del spawn
+preload-spawn-chunks = true
+
+# Número de hilos para procesamiento de datos
+processing-threads = 4
+
+# Tamaño máximo de buffer en MB
+max-buffer-size-mb = 128
+
+# Habilitar compresión de respuestas HTTP
+compress-responses = true
+
+[web-viewer.ui]
+# Configuración de interfaz de usuario
+
+# Tema: "dark", "light", "auto"
+theme = "dark"
+
+# Idioma: "es", "en", "auto"
+language = "es"
+
+# Habilitar animaciones y transiciones
+animations-enabled = true
+
+# Habilitar efectos visuales
+visual-effects = true
+
+# Mostrar tooltips informativos
+show-tooltips = true
+
+# Habilitar sonido de notificaciones
+notification-sound = true
+
+# Opacidad del fondo (0.0 - 1.0)
+background-opacity = 0.9
+
+# Habilitar modo pantalla completa
+fullscreen-enabled = true
+
+[web-viewer.logging]
+# Configuración de logging
+
+# Nivel de log: "DEBUG", "INFO", "WARN", "ERROR"
+log-level = "INFO"
+
+# Habilitar logging de acceso
+access-log-enabled = true
+
+# Habilitar logging de errores
+error-log-enabled = true
+
+# Formato de timestamp
+timestamp-format = "yyyy-MM-dd HH:mm:ss"
+
+# Máximo tamaño de archivo de log en MB
+max-log-size-mb = 10
+
+# Número máximo de archivos de log a conservar
+max-log-files = 5
+
+# Habilitar logging a consola
+console-log-enabled = true
+
+[web-viewer.backup]
+# Configuración de backups
+
+# Habilitar backups automáticos
+auto-backup-enabled = true
+
+# Intervalo de backups en horas
+backup-interval-hours = 6
+
+# Número máximo de backups a conservar
+max-backups = 24
+
+# Comprimir backups
+compress-backups = true
+
+# Directorio de backups
+backup-directory = "./backups/webviewer"
+
+# Incluir datos de configuración en backup
+include-config = true
+
+# Incluir datos de caché en backup
+include-cache = false
