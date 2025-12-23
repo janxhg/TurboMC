@@ -80,7 +80,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
              32,   // prefetch batch size
              256 * 1024 * 1024, // 256MB max memory
              true, // predictive enabled
-             6);   // prediction scale
+             12);   // prediction scale (increased for speed 10)
     }
     
     public MMapReadAheadEngine(Path regionPath, int maxCacheSize, int prefetchDistance,
@@ -232,12 +232,41 @@ public class MMapReadAheadEngine implements AutoCloseable {
                 throw new IOException("No memory mapping available");
             }
             
-            // Decompress if needed
-            if (header.getCompressionType() != LRFConstants.COMPRESSION_NONE) {
-                return TurboCompressionService.getInstance().decompress(data);
+            // Parse Local Chunk Header (5 bytes)
+            // [Length: 4 bytes] [CompressionType: 1 byte] [Payload: N bytes]
+            // Note: header.getChunkSize() returns aligned sector size (4KB), 
+            // so we MUST read the actual length from the local header.
+            int actualLength = ByteBuffer.wrap(data, 0, 4).getInt();
+            int localType = data[4];
+            
+            // Validate length
+            if (actualLength <= 0 || actualLength > size) {
+                 // Corrupt data or race condition?
+                 // If actualLength > size (allocated sector space), it's definitely corrupt.
+                 // But for now, let's respect the local header if within bounds.
+                 if (actualLength > size) {
+                     throw new IOException("Chunk length (" + actualLength + ") exceeds allocated sector size (" + size + ")");
+                 }
             }
             
-            return data;
+            // Extract payload
+            // actualLength includes the 4 length bytes, so payload start is at 5.
+            // Payload size = actualLength - 4 (length bytes) - 1 (type byte) = actualLength - 5.
+            int payloadSize = actualLength - 5;
+            
+            if (payloadSize < 0) {
+                 throw new IOException("Invalid chunk payload size: " + payloadSize);
+            }
+            
+            byte[] payload = new byte[payloadSize];
+            System.arraycopy(data, 5, payload, 0, payloadSize);
+            
+            // Decompress if needed (Use local type as authority)
+            if (localType != LRFConstants.COMPRESSION_NONE) {
+                return TurboCompressionService.getInstance().decompress(payload);
+            }
+            
+            return payload;
         } catch (Exception e) {
             throw new IOException("Failed to read chunk " + chunkX + "," + chunkZ, e);
         }
@@ -307,7 +336,8 @@ public class MMapReadAheadEngine implements AutoCloseable {
         int velZ = 0;
         
         // Calculate velocity if this isn't the first access and it's nearby (not teleport)
-        if (lastX != Integer.MIN_VALUE && Math.abs(centerX - lastX) <= 2 && Math.abs(centerZ - lastZ) <= 2) {
+        // High Speed Support: Increased threshold from 2 to 10 chunks to allow flyspeed 10
+        if (lastX != Integer.MIN_VALUE && Math.abs(centerX - lastX) <= 10 && Math.abs(centerZ - lastZ) <= 10) {
              velX = centerX - lastX;
              velZ = centerZ - lastZ;
         }

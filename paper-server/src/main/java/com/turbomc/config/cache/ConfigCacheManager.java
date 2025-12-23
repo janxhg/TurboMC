@@ -41,13 +41,23 @@ public class ConfigCacheManager {
 
             byte[] sourceBytes = Files.readAllBytes(sourceFile);
             byte[] currentHash = calculateHash(sourceBytes);
+            
+            // FIX #6: Check timestamps to prevent stale cache
+            long sourceModTime = Files.getLastModifiedTime(sourceFile).toMillis();
 
             // 2. Try to load from cache
             if (Files.exists(cacheFile)) {
-                Map<String, Object> cachedData = loadFromCache(cacheFile, currentHash);
-                if (cachedData != null) {
-                    System.out.println("[TurboMC][Cache] Loaded config from binary cache: " + cacheFile.getFileName());
-                    return cachedData;
+                long cacheModTime = Files.getLastModifiedTime(cacheFile).toMillis();
+                
+                // Only use cache if it's newer than source
+                if (cacheModTime >= sourceModTime) {
+                    Map<String, Object> cachedData = loadFromCache(cacheFile, currentHash);
+                    if (cachedData != null) {
+                        System.out.println("[TurboMC][Cache] Loaded config from binary cache: " + cacheFile.getFileName());
+                        return cachedData;
+                    }
+                } else {
+                    System.out.println("[TurboMC][Cache] Cache older than source, regenerating: " + cacheFile.getFileName());
                 }
             }
 

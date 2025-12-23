@@ -40,6 +40,20 @@ public class TurboConfig {
             this.toml = loadFromYaml();
             System.out.println("[TurboMC][CFG] Loaded configuration from paper-global.yml (turbo.toml not found)");
         }
+        
+        // Adjust Moonrise worker threads based on config
+        adjustMoonriseThreads();
+    }
+    
+    private void adjustMoonriseThreads() {
+        try {
+            int genThreads = getInt("chunk.generation-threads", 0);
+            int ioThreads = getInt("storage.batch.load-threads", 4);
+            ca.spottedleaf.moonrise.common.util.MoonriseCommon.adjustWorkerThreads(genThreads, ioThreads);
+        } catch (Throwable t) {
+            // Might fail if classes aren't loaded yet or in different source set
+            System.err.println("[TurboMC][CFG] Could not adjust Moonrise threads: " + t.getMessage());
+        }
     }
     
     public static TurboConfig getInstance(File serverDirectory) {
@@ -139,12 +153,13 @@ public class TurboConfig {
                 enabled = true
                 
                 # Maximum cache size in number of chunks
-                max-cache-size = 1024
+                max-cache-size = 512
                 
                 # Prefetch distance in chunks from player position
-                prefetch-distance = 8
+                prefetch-distance = 4
                 
                 # Prefetch batch size
+                # Prefetch batch size (Increased for NVMe)
                 prefetch-batch-size = 32
                 
                 # Predictive/Kinematic Prefetching
@@ -152,10 +167,11 @@ public class TurboConfig {
                 predictive-enabled = true
                 
                 # Prediction strength (how many chunks ahead to look)
-                prediction-scale = 6
+                # Increased to 12 for high speed flight support
+                prediction-scale = 12
                 
                 # Maximum memory usage for caching (in MB)
-                max-memory-usage = 512
+                max-memory-usage = 128
                 
                 # Use Java 22+ Foreign Memory API if available
                 use-foreign-memory-api = true
@@ -247,6 +263,9 @@ public class TurboConfig {
                 # Enable parallel chunk generation
                 parallel_generation_enabled = true
                 
+                # Number of threads for parallel generation (0 = auto)
+                generation-threads = 0
+                
                 # Enable chunk caching
                 caching_enabled = true
                 
@@ -254,13 +273,13 @@ public class TurboConfig {
                 priority_loading_enabled = true
                 
                 # Maximum memory usage for chunk caching (in MB)
-                max-memory-usage-mb = 512
+                max-memory-usage-mb = 128
                 
                 # Memory threshold for cache cleanup (0.8 = 80%)
                 memory-threshold = 0.8
                 
                 # Default loading strategy: CONSERVATIVE, BALANCED, AGGRESSIVE, EXTREME, ADAPTIVE
-                default-strategy = "BALANCED"
+                default-strategy = "AGGRESSIVE"
                 
                 [version-control]
                 # Minimum Minecraft version allowed to connect (e.g., "1.20.1")
@@ -400,10 +419,10 @@ public class TurboConfig {
                     // Add default mmap section if missing
                     Map<String, Object> defaultMmap = new HashMap<>();
                     defaultMmap.put("enabled", true);
-                    defaultMmap.put("max-cache-size", 512);
-                    defaultMmap.put("prefetch-distance", 4);
-                    defaultMmap.put("prefetch-batch-size", 16);
-                    defaultMmap.put("max-memory-usage", 256);
+                    defaultMmap.put("max-cache-size", 256);
+                    defaultMmap.put("prefetch-distance", 3);
+                    defaultMmap.put("prefetch-batch-size", 8);
+                    defaultMmap.put("max-memory-usage", 128);
                     defaultMmap.put("use-foreign-memory-api", true);
                     storageFull.put("mmap", defaultMmap);
                 }
@@ -688,5 +707,14 @@ public class TurboConfig {
         // Note: To fully reload, we'd need to handle field replacement
         // For now, this is a placeholder for future hot-reload support
         System.out.println("[TurboMC] Configuration reloaded");
+        adjustMoonriseThreads();
+    }
+    
+    public static boolean isParallelGenerationEnabled() {
+        return getInstance().getBoolean("chunk.parallel_generation_enabled", true);
+    }
+    
+    public static int getGenerationThreads() {
+        return getInstance().getInt("chunk.generation-threads", 0);
     }
 }

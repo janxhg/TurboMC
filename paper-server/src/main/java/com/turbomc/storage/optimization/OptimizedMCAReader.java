@@ -43,7 +43,11 @@ public class OptimizedMCAReader implements AutoCloseable {
         this.mcaPath = mcaPath;
         // FIXED: Use proper RegionFile constructor
         this.regionFile = new RegionFile(null, mcaPath, mcaPath.getParent(), true);
-        this.readExecutor = Executors.newFixedThreadPool(4);
+        this.readExecutor = Executors.newFixedThreadPool(4, r -> {
+            Thread t = new Thread(r, "OptimizedMCA-Reader");
+            t.setDaemon(true);
+            return t;
+        });
         this.activeReads = new AtomicInteger(0);
         
         // Load configuration

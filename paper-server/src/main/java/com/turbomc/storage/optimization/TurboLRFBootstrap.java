@@ -167,6 +167,9 @@ public final class TurboLRFBootstrap {
             if (conversionMode == ConversionMode.FULL_LRF && autoConvert) {
                 performFullLRFMigration(serverDirectory);
             }
+            
+            // Start cache cleanup task
+            startCacheMaintenanceTasks();
         } catch (Exception e) {
             System.err.println("[TurboMC][LRF] Failed to initialize LRF storage system: " + e.getMessage());
             e.printStackTrace();
@@ -303,5 +306,33 @@ public final class TurboLRFBootstrap {
             System.err.println("[TurboMC][LRF] Failed to perform full LRF migration: " + e.getMessage());
             e.printStackTrace();
         }
+    }
+    
+    /**
+     * Start periodic cache maintenance tasks.
+     */
+    private static void startCacheMaintenanceTasks() {
+        Thread cleanupThread = new Thread(() -> {
+            while (true) {
+                try {
+                    Thread.sleep(5 * 60 * 1000);
+                    if (com.turbomc.storage.cache.TurboCacheManager.getInstance() != null) {
+                        int removed = com.turbomc.storage.cache.TurboCacheManager.getInstance().cleanupExpired();
+                        if (removed > 0) {
+                            System.out.println("[TurboMC][Cache] Cleaned up " + removed + " expired entries");
+                        }
+                        var stats = com.turbomc.storage.cache.TurboCacheManager.getInstance().getStats();
+                        System.out.println("[TurboMC][Cache] " + stats);
+                    }
+                } catch (InterruptedException e) {
+                    break;
+                } catch (Exception e) {
+                    System.err.println("[TurboMC][Cache] Error: " + e.getMessage());
+                }
+            }
+        }, "TurboMC-Cache-Cleanup");
+        cleanupThread.setDaemon(true);
+        cleanupThread.start();
+        System.out.println("[TurboMC][Cache] Started cache maintenance (5min)");
     }
 }

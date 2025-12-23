@@ -44,7 +44,7 @@ public class TurboCompressionService {
                          " (level " + level + "), fallback " + (fallbackEnabled ? "enabled" : "disabled"));
     }
     
-    public static void initialize(TurboConfig config) {
+    public static synchronized void initialize(TurboConfig config) {
         if (instance == null) {
             instance = new TurboCompressionService(config);
         }
@@ -147,6 +147,21 @@ public class TurboCompressionService {
         }
     }
     
+    // Static cache for compressor instances to avoid recreation
+    private static final java.util.Map<Byte, Compressor> MAGIC_BYTE_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+    
+    static {
+        // Pre-populate common compressors
+        try {
+            MAGIC_BYTE_CACHE.put((byte)0x54, new ZstdCompressor(3));
+            MAGIC_BYTE_CACHE.put((byte)0x4C, new LZ4CompressorImpl(3));
+            MAGIC_BYTE_CACHE.put((byte)0x78, new ZlibCompressor(3));
+        } catch (Exception e) {
+            // If compressor initialization fails, they won't be in cache
+            System.err.println("[TurboMC] Warning: Some compressors failed to initialize for cache");
+        }
+    }
+    
     /**
      * Detect compressor from magic byte.
      *
@@ -159,11 +174,11 @@ public class TurboCompressionService {
         } else if (magicByte == fallbackCompressor.getMagicByte()) {
             return fallbackCompressor;
         } else {
-            // Check specific known magic bytes for safety if primary/fallback changes
-            // Zstd = 0x54 ('T'), LZ4 = 0x4C ('L'), Zlib = 0x78 ('x')
-            if (magicByte == 0x54) return new ZstdCompressor(3);
-            if (magicByte == 0x4C) return new LZ4CompressorImpl(3); 
-            if (magicByte == 0x78) return new ZlibCompressor(3);
+            // Check cached compressor instances
+            Compressor cached = MAGIC_BYTE_CACHE.get(magicByte);
+            if (cached != null) {
+                return cached;
+            }
             
             // Unknown format, try primary compressor as last resort
             System.out.println("[TurboMC] Unknown compression format (magic byte: 0x" + 

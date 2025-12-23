@@ -135,12 +135,14 @@ public class LRFRegionWriter implements AutoCloseable {
     /**
      * Write chunk in streaming mode.
      */
-    private void writeChunkStreaming(LRFChunkEntry chunk) throws IOException {
+    public void writeChunkStreaming(LRFChunkEntry chunk) throws IOException {
         long startTime = System.nanoTime();
         
-        byte[] data = chunk.getData();
-        
+        // FIX #2: Removed duplicate getData() call
         byte[] dataToWrite = chunk.getData();
+        
+        // Track if we had to fall back to uncompressed
+        int actualCompressionType = compressionType;
         
         // Compress if needed with error handling
         byte[] compressedData;
@@ -150,43 +152,56 @@ public class LRFRegionWriter implements AutoCloseable {
             try {
                 compressedData = TurboCompressionService.getInstance().compress(dataToWrite);
             } catch (com.turbomc.compression.CompressionException e) {
-                System.err.println("[TurboMC] Compression failed for chunk at " + chunk.getChunkX() + "," + chunk.getChunkZ() + ", using uncompressed data");
-                // Fallback to uncompressed data
+                // FIX #5: Update compression type when falling back to uncompressed
+                System.err.println("[TurboMC][LRF] Compression failed for chunk (" + 
+                    chunk.getChunkX() + "," + chunk.getChunkZ() + "): " + e.getMessage() + 
+                    ". Using uncompressed data.");
                 compressedData = dataToWrite;
+                actualCompressionType = LRFConstants.COMPRESSION_NONE;
             }
         }
         
-        // FIXED: Thread-safe file position management and ALIGNMENT (256 bytes)
+        // FIX #4 & #7: Thread-safe with proper alignment padding
         long currentPos;
-        synchronized (channel) {
-            currentPos = channel.position();
-            // Align to 256 bytes
-            if (currentPos % 256 != 0) {
-                currentPos = (currentPos / 256 + 1) * 256;
-                channel.position(currentPos);
+        synchronized (streamingHeader) {  // FIX #4: Sync on header, not channel
+            synchronized (channel) {
+                currentPos = channel.position();
+                
+                // FIX #7: Write padding bytes instead of just seeking
+                if (currentPos % 256 != 0) {
+                    long alignedPos = (currentPos / 256 + 1) * 256;
+                    int paddingSize = (int)(alignedPos - currentPos);
+                    byte[] padding = new byte[paddingSize];
+                    channel.write(ByteBuffer.wrap(padding));
+                    currentPos = alignedPos;
+                }
+                
+                if (currentPos < LRFConstants.HEADER_SIZE) {
+                    int paddingSize = (int)(LRFConstants.HEADER_SIZE - currentPos);
+                    byte[] padding = new byte[paddingSize];
+                    channel.write(ByteBuffer.wrap(padding));
+                    currentPos = LRFConstants.HEADER_SIZE;
+                }
+                
+                // Write length header (4 bytes) - Total length = 4 + compressedData.length + 1 (compression type)
+                int totalLength = 4 + 1 + compressedData.length;
+                ByteBuffer lengthBuffer = ByteBuffer.allocate(5);
+                lengthBuffer.putInt(totalLength);
+                lengthBuffer.put((byte)actualCompressionType);  // FIX #5: Store actual compression used
+                lengthBuffer.flip();
+                channel.write(lengthBuffer);
+                
+                // Write chunk data with buffer
+                writeWithBuffer(compressedData);
+                
+                // Update streaming header (now inside sync block)
+                streamingHeader.setChunkData(
+                    chunk.getChunkX(),
+                    chunk.getChunkZ(),
+                    (int) currentPos,
+                    totalLength
+                );
             }
-            if (currentPos < LRFConstants.HEADER_SIZE) {
-                currentPos = LRFConstants.HEADER_SIZE;
-                channel.position(currentPos);
-            }
-            
-            // Write length header (4 bytes) - Total length = 4 + compressedData.length
-            int totalLength = 4 + compressedData.length;
-            ByteBuffer lengthBuffer = ByteBuffer.allocate(4);
-            lengthBuffer.putInt(totalLength);
-            lengthBuffer.flip();
-            channel.write(lengthBuffer);
-            
-            // Write chunk data with buffer
-            writeWithBuffer(compressedData);
-            
-            // Update streaming header
-            streamingHeader.setChunkData(
-                chunk.getChunkX(),
-                chunk.getChunkZ(),
-                (int) currentPos,
-                totalLength
-            );
         }
         
         // Update statistics

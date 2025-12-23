@@ -70,20 +70,41 @@ public class TurboStorageManager implements AutoCloseable {
         if (config.getBoolean("storage.batch.enabled", true)) {
             int processors = Runtime.getRuntime().availableProcessors();
             
-            // Scalable thread pool sizes
-            int loadThreads = config.getInt("storage.batch.global-load-threads", Math.max(2, processors / 4));
-            int writeThreads = config.getInt("storage.batch.global-save-threads", Math.max(1, processors / 8));
-            int compressionThreads = config.getInt("storage.batch.global-compression-threads", Math.max(2, processors / 2));
-            int decompressionThreads = config.getInt("storage.batch.global-decompression-threads", Math.max(2, processors / 2));
+            // FIX: Cap thread counts to prevent explosion on high-core systems
+            final int MAX_LOAD_THREADS = 8;
+            final int MAX_WRITE_THREADS = 4;
+            final int MAX_COMPRESSION_THREADS = 16;
             
-            this.globalLoadExecutor = java.util.concurrent.Executors.newFixedThreadPool(loadThreads, 
-                r -> new Thread(r, "Turbo-Global-LoadPool"));
-            this.globalWriteExecutor = java.util.concurrent.Executors.newFixedThreadPool(writeThreads, 
-                r -> new Thread(r, "Turbo-Global-WritePool"));
-            this.globalCompressionExecutor = java.util.concurrent.Executors.newFixedThreadPool(compressionThreads, 
-                r -> new Thread(r, "Turbo-Global-CompressionPool"));
-            this.globalDecompressionExecutor = java.util.concurrent.Executors.newFixedThreadPool(decompressionThreads, 
-                r -> new Thread(r, "Turbo-Global-DecompressionPool"));
+            // Scalable thread pool sizes with caps
+            int loadThreads = Math.max(2, Math.min(config.getInt("storage.batch.global-load-threads", processors / 4), MAX_LOAD_THREADS));
+            int writeThreads = Math.max(1, Math.min(config.getInt("storage.batch.global-save-threads", processors / 8), MAX_WRITE_THREADS));
+            int compressionThreads = Math.max(2, Math.min(config.getInt("storage.batch.global-compression-threads", processors / 2), MAX_COMPRESSION_THREADS));
+            int decompressionThreads = Math.max(2, Math.min(config.getInt("storage.batch.global-decompression-threads", processors / 2), MAX_COMPRESSION_THREADS));
+            
+            // FIX: Create daemon threads to allow JVM shutdown
+            this.globalLoadExecutor = java.util.concurrent.Executors.newFixedThreadPool(loadThreads, r -> {
+                Thread t = new Thread(r, "Turbo-Global-LoadPool");
+                t.setDaemon(true);  // CRITICAL: Allow JVM to shutdown
+                return t;
+            });
+            
+            this.globalWriteExecutor = java.util.concurrent.Executors.newFixedThreadPool(writeThreads, r -> {
+                Thread t = new Thread(r, "Turbo-Global-WritePool");
+                t.setDaemon(true);
+                return t;
+            });
+            
+            this.globalCompressionExecutor = java.util.concurrent.Executors.newFixedThreadPool(compressionThreads, r -> {
+                Thread t = new Thread(r, "Turbo-Global-CompressionPool");
+                t.setDaemon(true);
+                return t;
+            });
+            
+            this.globalDecompressionExecutor = java.util.concurrent.Executors.newFixedThreadPool(decompressionThreads, r -> {
+                Thread t = new Thread(r, "Turbo-Global-DecompressionPool");
+                t.setDaemon(true);
+                return t;
+            });
                 
             System.out.println("[TurboMC][Storage] Global thread pools initialized (" + 
                 loadThreads + "L, " + writeThreads + "W, " + compressionThreads + "C, " + decompressionThreads + "D)");
@@ -608,12 +629,31 @@ public class TurboStorageManager implements AutoCloseable {
     
     private void shutdownExecutor(ExecutorService executor, String name) {
         if (executor == null) return;
+        
         try {
+            System.out.println("[TurboMC][Storage] Shutting down " + name + "...");
             executor.shutdown();
-            if (!executor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
-                executor.shutdownNow();
+            
+            // FIX: Use longer timeout for write operations, shorter for others
+            int timeoutSeconds = name.contains("Write") ? 30 : 10;
+            
+            if (!executor.awaitTermination(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS)) {
+                System.err.println("[TurboMC][Storage][WARN] " + name + " didn't terminate in " + timeoutSeconds + "s, forcing shutdown...");
+                java.util.List<Runnable> remainingTasks = executor.shutdownNow();
+                
+                if (!remainingTasks.isEmpty()) {
+                    System.err.println("[TurboMC][Storage][WARN] " + name + " had " + remainingTasks.size() + " pending tasks");
+                }
+                
+                // Give 5 more seconds for forced shutdown
+                if (!executor.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                    System.err.println("[TurboMC][Storage][ERROR] " + name + " still has running tasks after forced shutdown!");
+                }
+            } else {
+                System.out.println("[TurboMC][Storage] " + name + " shutdown cleanly");
             }
         } catch (InterruptedException e) {
+            System.err.println("[TurboMC][Storage][ERROR] Interrupted while shutting down " + name);
             executor.shutdownNow();
             Thread.currentThread().interrupt();
         }

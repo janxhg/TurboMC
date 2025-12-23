@@ -46,7 +46,11 @@ public class BackgroundConversionScheduler implements AutoCloseable {
     public BackgroundConversionScheduler(Path regionDirectory, StorageFormat targetFormat) {
         this.regionDirectory = regionDirectory;
         this.targetFormat = targetFormat;
-        this.scheduler = Executors.newScheduledThreadPool(2);
+        this.scheduler = Executors.newScheduledThreadPool(2, r -> {
+            Thread t = new Thread(r, "Background-Conversion-Scheduler");
+            t.setDaemon(true);
+            return t;
+        });
         this.isRunning = new AtomicBoolean(false);
         this.convertedRegions = new AtomicLong(0);
         this.totalRegions = new AtomicLong(0);

@@ -29,9 +29,17 @@ public class LRFHeader {
     private final ByteBuffer offsetTable; // 228 bytes compact storage
     private final boolean[] chunkExists; // 1024 bits for existence check
     
-    // Cache for frequently accessed chunks
+    
+    // FIX #8: Use LinkedHashMap with LRU eviction instead of unbounded ConcurrentHashMap
+    private static final int MAX_HEADER_CACHE_SIZE = 256;
     private static final java.util.Map<Integer, LRFHeader> headerCache = 
-        new java.util.concurrent.ConcurrentHashMap<>(LRFConstants.CACHE_SIZE);
+        java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<Integer, LRFHeader>(
+            MAX_HEADER_CACHE_SIZE + 1, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(java.util.Map.Entry<Integer, LRFHeader> eldest) {
+                return size() > MAX_HEADER_CACHE_SIZE;
+            }
+        });
     
     /**
      * Create header from compact storage.

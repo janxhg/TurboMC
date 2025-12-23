@@ -58,9 +58,12 @@ public class LRFRegionFileAdapter extends RegionFile {
         int chunkZ = chunkPos.z & 31;
         
         // 1. Check Global Cache (L1)
-        byte[] cached = TurboCacheManager.getInstance().get(filePath, chunkX, chunkZ);
-        if (cached != null) {
-            return new DataInputStream(new ByteArrayInputStream(cached));
+        TurboCacheManager cache = TurboCacheManager.getInstance();
+        if (cache != null) {
+            byte[] cached = cache.get(filePath, chunkX, chunkZ);
+            if (cached != null) {
+                return new DataInputStream(new ByteArrayInputStream(cached));
+            }
         }
 
         if (!header.hasChunk(chunkX, chunkZ)) {
@@ -115,7 +118,9 @@ public class LRFRegionFileAdapter extends RegionFile {
 
         // 3. Update Cache
         // Cache pure NBT data
-        TurboCacheManager.getInstance().put(filePath, chunkX, chunkZ, nbtData);
+        if (TurboCacheManager.getInstance() != null) {
+            TurboCacheManager.getInstance().put(filePath, chunkX, chunkZ, nbtData);
+        }
         
         return new DataInputStream(new ByteArrayInputStream(nbtData));
     }

@@ -192,7 +192,11 @@ public class TurboFPSOptimizer implements TurboOptimizerModule {
             return;
         }
         
-        scheduler = Executors.newScheduledThreadPool(2);
+        scheduler = Executors.newScheduledThreadPool(2, r -> {
+            Thread t = new Thread(r, "TurboFPS-Optimizer");
+            t.setDaemon(true);
+            return t;
+        });
         
         // Monitor TPS every second
         scheduler.scheduleAtFixedRate(this::monitorTPS, 1, 1, TimeUnit.SECONDS);

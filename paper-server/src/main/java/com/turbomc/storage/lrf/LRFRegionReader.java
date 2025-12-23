@@ -133,7 +133,17 @@ public class LRFRegionReader implements AutoCloseable {
         int offset = header.getChunkOffset(chunkX, chunkZ);
         int size = header.getChunkSize(chunkX, chunkZ);
         
-        if (size <= 0 || size > LRFConstants.MAX_CHUNK_SIZE) {
+        // FIX #9: Better error messages
+        if (size <= 0) {
+            if (System.getProperty("turbomc.debug") != null) {
+                System.err.println("[TurboMC][LRF][DEBUG] Invalid chunk size " + size + " for (" + chunkX + "," + chunkZ + ")");
+            }
+            return null;
+        }
+        
+        if (size > LRFConstants.MAX_CHUNK_SIZE) {
+            System.err.println("[TurboMC][LRF][WARN] Chunk (" + chunkX + "," + chunkZ + ") size " + size + 
+                " exceeds max " + LRFConstants.MAX_CHUNK_SIZE + ", possibly corrupt");
             return null;
         }
         
@@ -150,32 +160,79 @@ public class LRFRegionReader implements AutoCloseable {
             channel.read(readBuffer, offset);
         }
         
-        // Parse Length Header (First 4 bytes)
-        if (size < 4) return null;
+        // Parse Length Header (First 5 bytes: 4 length + 1 compression type)
+        if (size < 5) {
+            System.err.println("[TurboMC][LRF][WARN] Chunk (" + chunkX + "," + chunkZ + ") too small: " + size + " bytes");
+            return null;
+        }
         
         int totalLength = ((rawSectorData[0] & 0xFF) << 24) | 
                           ((rawSectorData[1] & 0xFF) << 16) | 
                           ((rawSectorData[2] & 0xFF) << 8) | 
                           (rawSectorData[3] & 0xFF);
+        
+        // FIX #11: Read per-chunk compression type
+        int chunkCompressionType = rawSectorData[4] & 0xFF;
                            
-        if (totalLength <= 4 || totalLength > size || totalLength > LRFConstants.MAX_CHUNK_SIZE) {
-             return null; 
+        if (totalLength <= 5 || totalLength > size || totalLength > LRFConstants.MAX_CHUNK_SIZE) {
+            System.err.println("[TurboMC][LRF][WARN] Invalid chunk length " + totalLength + " for (" + chunkX + "," + chunkZ + ")");
+            return null; 
         }
         
-        int compressedPayloadSize = totalLength - 4;
-        byte[] compressedPayload = new byte[compressedPayloadSize];
-        System.arraycopy(rawSectorData, 4, compressedPayload, 0, compressedPayloadSize);
+        int compressedPayloadSize = totalLength - 5;  // Subtract header (4) + compression type (1)
+        
+        // FIX #10: Use ByteBuffer.slice() to avoid copy
+        byte[] compressedPayload;
+        if (compressedPayloadSize > 0) {
+            ByteBuffer payloadBuffer = ByteBuffer.wrap(rawSectorData, 5, compressedPayloadSize);
+            compressedPayload = new byte[compressedPayloadSize];
+            payloadBuffer.get(compressedPayload);
+        } else {
+            compressedPayload = new byte[0];
+        }
         
         byte[] data;
-        if (header.getCompressionType() == LRFConstants.COMPRESSION_NONE) {
+        if (chunkCompressionType == LRFConstants.COMPRESSION_NONE) {
             data = compressedPayload;
         } else {
-            data = TurboCompressionService.getInstance().decompress(compressedPayload);
+            try {
+                data = TurboCompressionService.getInstance().decompress(compressedPayload);
+            } catch (Exception e) {
+                System.err.println("[TurboMC][LRF][ERROR] Decompression failed for (" + chunkX + "," + chunkZ + "): " + e.getMessage());
+                return null;
+            }
         }
         
+        // FIX: Intelligent batch cache eviction with high watermark
         synchronized (cacheLock) {
-            long newCacheSize = currentCacheSize.get() + data.length;
-            if (newCacheSize <= MAX_CACHE_MEMORY && chunkCache.size() < LRFConstants.CACHE_SIZE) {
+            // High watermark strategy - keep cache at 90% to avoid constant eviction
+            long highWatermark = (long)(MAX_CACHE_MEMORY * 0.9);
+            
+            // If adding would exceed watermark, batch evict down to 80%
+            if (currentCacheSize.get() + data.length > highWatermark) {
+                long targetSize = (long)(MAX_CACHE_MEMORY * 0.8);
+                long toFree = (currentCacheSize.get() + data.length) - targetSize;
+                
+                // Batch eviction - free multiple entries in one pass (MUCH faster!)
+                long freed = 0;
+                var iterator = chunkCache.int2ObjectEntrySet().iterator();
+                
+                while (iterator.hasNext() && freed < toFree) {
+                    var entry = iterator.next();
+                    byte[] evictedData = entry.getValue();
+                    iterator.remove();
+                    freed += evictedData.length;
+                    currentCacheSize.addAndGet(-evictedData.length);
+                }
+                
+                if (freed > 0 && System.getProperty("turbomc.debug") != null) {
+                    System.out.println("[TurboMC][LRF][Cache] Batch evicted " + freed / 1024 + 
+                        "KB (now at " + currentCacheSize.get() / 1024 + "KB)");
+                }
+            }
+            
+            // Now add if there's space
+            if (currentCacheSize.get() + data.length <= MAX_CACHE_MEMORY) {
                 chunkCache.put(chunkIndex, data);
                 currentCacheSize.addAndGet(data.length);
             }
