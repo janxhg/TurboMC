@@ -241,4 +241,4 @@ For issues or questions:
 
 ---
 
-**TurboMC v1.3.0** | LRF Storage System Ready
+**TurboMC v2.0.0 (The Speed Update)** | LRF Storage System v2 Ready

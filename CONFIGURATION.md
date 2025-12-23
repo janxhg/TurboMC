@@ -80,10 +80,30 @@ max-cache-size = 512
 prefetch-distance = 4
 
 # Prefetch batch size
-prefetch-batch-size = 16
+prefetch-batch-size = 32
+
+# Predictive/Kinematic Prefetching (v2.0)
+# Analyzes movement vectors to pre-load chunks in the direction of travel
+predictive-enabled = true
+
+# Prediction strength (how many chunks ahead to look)
+# Recommended: 12 for high speed flight (speed 10+)
+prediction-scale = 12
 
 # Maximum memory usage in MB
 max-memory-usage = 256
+```
+
+### OVF (Optimized Voxel Format) Configuration [NEW v2.0]
+
+```toml
+[ovf]
+# Enable Optimized Voxel Format for high-performance structure loading
+enabled = true
+
+# Compression level for RLE (Run-Length Encoding)
+# Note: RLE is always active, level 3 is currently standard.
+compression-level = 3
 ```
 
 ### Background Conversion Configuration
@@ -107,29 +127,12 @@ min-idle-time-ms = 30000
 
 ```toml
 [chunk]
-# Enable chunk loading optimizer (experimental)
-optimizer.enabled = false
+# Enable chunk loading optimizer
+optimizer.enabled = true
 
 # Default loading strategy: "conservative", "balanced", "aggressive", "extreme", "adaptive"
-default-strategy = "balanced"
-
-# Enable preloading
-preloading.enabled = false
-
-# Enable parallel generation
-parallel-generation.enabled = false
-
-# Enable caching
-caching.enabled = false
-
-# Enable priority loading
-priority-loading.enabled = false
-
-# Maximum memory usage for chunk optimizer (MB)
-max-memory-usage-mb = 512
-
-# Memory threshold for triggering cleanup (0.0-1.0)
-memory-threshold = 0.8
+# Recommended: "aggressive" for v2.0 performance
+default-strategy = "aggressive"
 ```
 
 ### Performance Optimization Configuration
@@ -335,5 +338,5 @@ Use `/turbo monitor` command to see:
 
 ---
 
-**Last Updated**: 2025-12-12
-**Version**: 1.5.0
+**Last Updated**: 2025-12-23
+**Version**: 2.0.0 (The Speed Update)

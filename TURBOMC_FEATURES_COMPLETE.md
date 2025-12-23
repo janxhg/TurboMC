@@ -15,10 +15,10 @@ Versión 1.6.0 | Java 21+ | PaperMC Fork Optimizado
 - LRFRegionFileAdapter: Adaptador para compatibilidad con RegionFileStorage
 
 ## Optimizadores de Almacenamiento
-- MMapReadAheadEngine: Memory-mapped I/O con prefetching inteligente
+- MMapReadAheadEngine: Memory-mapped I/O con prefetching inteligente [ENHANCED v2.0.0]
 - ChunkBatchLoader: Carga asíncrona de chunks en lotes
 - ChunkBatchSaver: Guardado asíncrono de chunks en lotes
-- TurboCacheManager: Gestor de caché multinivel
+- TurboCacheManager: Gestor de caché multinivel (Disabled by default on NVMe)
 - HybridChunkCache: Caché híbrida RAM+Disk
 - OptimizedMCAReader: Lector optimizado para archivos MCA legacy
 
@@ -74,11 +74,20 @@ Versión 1.6.0 | Java 21+ | PaperMC Fork Optimizado
   - Preloading inteligente
   - Cache management
 
+# SISTEMA DE VOXEL Y ESTRUCTURAS (NUEVO v2.0)
+
+## Optimized Voxel Format (OVF)
+- OVFFormat: Definición del formato binario v1 con Magic Header "TURBO_OVF"
+- OVFWriter: Motor de compresión RLE (Run-Length Encoding) para voxels
+- OVFReader: Descompresión ultra-rápida y reconstrucción de grids (<20ms para 16M bloques)
+- SchematicConverter: Conversor asíncrono NBT (.schem) → OVF (.ovf)
+- SimpleNBTReader: Lector NBT independiente para integración de schematics
+
 # SISTEMA DE CONFIGURACIÓN
 
 ## Configuración Principal
 - TurboConfig: Gestor principal de configuración
-  - Soporte TOML (turbo.toml)
+  - Soporte TOML (turbo.toml) con sección [ovf]
   - Fallback YAML (paper-global.yml)
   - Hot-reload de configuración
   - Validación de configuración
@@ -95,6 +104,8 @@ Versión 1.6.0 | Java 21+ | PaperMC Fork Optimizado
   - /turbo storage reload
   - /turbo storage convert
   - /turbo storage info
+- TurboOVFCommand: Comandos de estructuras (NUEVO v2.0)
+  - /turbo ovf convert <source> <target>
 - LRFRepairCommand: Comandos de reparación LRF
   - /lrfrepair scan
   - /lrfrepair repair

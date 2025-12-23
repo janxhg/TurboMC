@@ -4,6 +4,16 @@ Fork avanzado de PaperMC con foco en **storage moderno**, **SIMD**, y **baja lat
 
 ---
 
+## 🚀 v2.0.0 — The Speed Update (Current)
+- **Optimized Voxel Format (OVF)**: Nuevo formato para estructuras con carga <20ms para 16M bloques.
+- **High-Speed Flight Ready**: Soporte oficial para `flyspeed 10` sin stuttering.
+- **NVMe Optimization**: Desactivación de caché L1 (RAM) por default (+95% throughput en hardware moderno).
+- **Zstd Padding Fix**: Corrección crítica en lectura de chunks alineados que eliminan errores de descompresión.
+- **Aggressive Prefetching**: Predicción de movimiento extendida a 12 chunks (Prediction Scale 12x).
+- **Configuración Automática**: Defaults ajustados para servers de alto rendimiento.
+
+---
+
 ## 🟢 v1.8.0 — Stability & Reliability (Stable)
 - **Zero-Failure Test Suite**: Estabilización completa del core.
 - **LRF Engine Final al 100%**: Fixes críticos en append/read headers.

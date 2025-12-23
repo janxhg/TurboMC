@@ -297,4 +297,4 @@ new LRFToMCAConverter(true)
 
 
 
-**TurboMC v1.3.0** | LRF Conversion Modes Implemented
+**TurboMC v2.0.0 (The Speed Update)** | LRF Conversion Modes Implemented

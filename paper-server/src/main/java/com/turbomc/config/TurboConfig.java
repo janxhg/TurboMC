@@ -196,6 +196,14 @@ public class TurboConfig {
                 # Validation interval in milliseconds (5 minutes)
                 validation-interval = 300000
                 
+                [ovf]
+                # Optimized Voxel Format (OVF) Configuration
+                # New high-performance structure format for <100ms load times
+                enabled = true
+                
+                # Compression (RLE) is always enabled in OVF, this controls additional ZSTD wrapping if implemented future
+                compression-level = 3
+                
                 [quality]
                 # Quality and rendering optimizations
                 # Target TPS for quality adjustments

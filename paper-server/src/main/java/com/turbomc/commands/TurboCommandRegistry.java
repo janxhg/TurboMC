@@ -65,7 +65,8 @@ public final class TurboCommandRegistry {
     public static String[] getRegisteredCommands() {
         return new String[]{
             "turbo storage",
-            "turbo inspect"
+            "turbo inspect",
+            "turbo ovf"
         };
     }
     
@@ -85,7 +86,7 @@ public final class TurboCommandRegistry {
                     return true;
                 }
                 
-                if (args.length == 0 || (!args[0].equals("storage") && !args[0].equals("inspect"))) {
+                if (args.length == 0 || (!args[0].equals("storage") && !args[0].equals("inspect") && !args[0].equals("ovf"))) {
                     sender.sendMessage("§6=== TurboMC Commands ===");
                     sender.sendMessage("§e/turbo storage stats §7- Show storage statistics");
                     sender.sendMessage("§e/turbo storage convert §7- Convert MCA files to LRF format");
@@ -95,19 +96,40 @@ public final class TurboCommandRegistry {
                     sender.sendMessage("§e/turbo inspect png <file> §7- Export region to PNG");
                     sender.sendMessage("§e/turbo inspect tree <file> §7- Chunk tree structure");
                     sender.sendMessage("§e/turbo inspect stats <file> §7- Compression statistics");
+                    sender.sendMessage("§e/turbo ovf convert <in.schem> <out.ovf> §7- Convert Schematic to OVF");
                     return true;
                 }
                 
-                // Handle storage or inspect subcommands
+                // Handle subcommands
                 if (args.length == 1) {
                     if (args[0].equals("storage")) {
                         sendStorageUsage(sender);
                     } else if (args[0].equals("inspect")) {
                         sendInspectUsage(sender);
+                    } else if (args[0].equals("ovf")) {
+                        sendOVFUsage(sender);
                     }
                     return true;
                 }
                 
+                // Handle ovf commands
+                if (args[0].equals("ovf")) {
+                    if (args.length < 2) {
+                        sendOVFUsage(sender);
+                        return true;
+                    }
+                    if (args[1].equals("convert")) {
+                        if (args.length < 4) {
+                            sender.sendMessage("§cUsage: /turbo ovf convert <input.schem> <output.ovf>");
+                            return true;
+                        }
+                        handleOVFConvert(sender, args[2], args[3]);
+                        return true;
+                    }
+                    sendOVFUsage(sender);
+                    return true;
+                }
+
                 // Handle storage commands
                 if (args[0].equals("storage")) {
                     String subCommand = args[1].toLowerCase();
@@ -154,7 +176,7 @@ public final class TurboCommandRegistry {
                         case "stats":
                             handleInspectStats(sender, fileName);
                             return true;
-                        default:
+                        case "default":
                             sendInspectUsage(sender);
                             return true;
                     }
@@ -171,7 +193,7 @@ public final class TurboCommandRegistry {
                 }
                 
                 if (args.length == 1) {
-                    return Arrays.asList("storage", "inspect");
+                    return Arrays.asList("storage", "inspect", "ovf");
                 }
                 
                 if (args.length == 2) {
@@ -179,6 +201,8 @@ public final class TurboCommandRegistry {
                         return Arrays.asList("stats", "convert", "info", "reload");
                     } else if (args[0].equals("inspect")) {
                         return Arrays.asList("hex", "png", "tree", "stats");
+                    } else if (args[0].equals("ovf")) {
+                        return Arrays.asList("convert");
                     }
                 }
                 
@@ -214,6 +238,45 @@ public final class TurboCommandRegistry {
         System.out.println("[TurboMC][Commands] Registered 2 Bukkit commands: turbo, lrfrepair");
     }
     
+    private static void sendOVFUsage(CommandSender sender) {
+        sender.sendMessage("§6=== TurboMC OVF Commands ===");
+        sender.sendMessage("§e/turbo ovf convert <in.schem> <out.ovf> §7- Convert Schematic to Optimized Voxel Format");
+    }
+
+    private static void handleOVFConvert(CommandSender sender, String inputName, String outputName) {
+        sender.sendMessage("§e[TurboMC] Converting Schematic to OVF...");
+        java.io.File inFile = new java.io.File(inputName);
+        java.io.File outFile = new java.io.File(outputName);
+        
+        if (!inFile.exists()) {
+            sender.sendMessage("§cInput file not found: " + inFile.getAbsolutePath());
+            return;
+        }
+        
+        // Run async
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try {
+                long start = System.currentTimeMillis();
+                com.turbomc.voxel.schematic.SchematicConverter.convert(inFile, outFile);
+                long time = System.currentTimeMillis() - start;
+                
+                long inSize = inFile.length();
+                long outSize = outFile.length();
+                double ratio = 100.0 * (1.0 - ((double)outSize / inSize));
+                
+                sender.sendMessage("§a[TurboMC] Conversion Complete!");
+                sender.sendMessage("§7Time: §f" + time + "ms");
+                sender.sendMessage("§7Original: §f" + inSize + " bytes");
+                sender.sendMessage("§7OVF: §f" + outSize + " bytes");
+                sender.sendMessage("§7Reduction: §a" + String.format("%.2f%%", ratio));
+                
+            } catch (Exception e) {
+                sender.sendMessage("§c[TurboMC] Conversion failed: " + e.getMessage());
+                e.printStackTrace();
+            }
+        });
+    }
+
     private static void sendStorageUsage(CommandSender sender) {
         sender.sendMessage("§6=== TurboMC Storage Commands ===");
         sender.sendMessage("§e/turbo storage stats §7- Show storage statistics");
