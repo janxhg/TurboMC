@@ -335,9 +335,18 @@ public class TurboConfig {
                 return new Toml().read(configFile);
             }
             
-            // Read YAML and extract turbo section
-            Yaml yaml = new Yaml();
-            Map<String, Object> data = yaml.load(Files.readString(globalYml));
+            // USE TURBO CACHE MANAGER
+            // This attempts to load .bin cache first, preventing SnakeYAML parsing overhead
+            java.util.Map<String, Object> data = com.turbomc.config.cache.ConfigCacheManager.loadWithCache(globalYml);
+            
+            if (data == null) {
+                 // Fallback if cache fails and somehow parsing inside manager also failed/returned null
+                 System.err.println("[TurboMC][CFG] Cache manager returned null. Fallback to standard.");
+                 Yaml yaml = new Yaml();
+                 data = yaml.load(Files.readString(globalYml));
+                 if (data == null) data = new java.util.HashMap<>();
+            }
+
             Map<String, Object> turboSection = (Map<String, Object>) data.get("turbo");
             
             if (turboSection == null) {

@@ -1,6 +1,8 @@
 import io.papermc.fill.model.BuildChannel
 import io.papermc.paperweight.attribute.DevBundleOutput
 import io.papermc.paperweight.util.*
+import io.papermc.paperweight.tasks.CreatePaperclipJar
+import io.papermc.paperweight.tasks.CreateBundlerJar
 import java.time.Instant
 
 plugins {
@@ -396,5 +398,20 @@ fill {
 // Fix for missing task dependency reported by Gradle 9+
 tasks.named("processResources") {
     dependsOn("applyResourcePatches")
+}
+
+// TurboMC: Force artifact renaming
+tasks.named<CreatePaperclipJar>("createMojmapPaperclipJar") {
+    outputZip.set(layout.buildDirectory.file("libs/turbo-paperclip-${project.version}.jar"))
+}
+tasks.named<CreateBundlerJar>("createMojmapBundlerJar") {
+    outputZip.set(layout.buildDirectory.file("libs/turbo-bundler-${project.version}.jar"))
+}
+// Reobf variants
+tasks.named<CreatePaperclipJar>("createReobfPaperclipJar") {
+    outputZip.set(layout.buildDirectory.file("libs/turbo-paperclip-${project.version}-reobf.jar"))
+}
+tasks.named<CreateBundlerJar>("createReobfBundlerJar") {
+    outputZip.set(layout.buildDirectory.file("libs/turbo-bundler-${project.version}-reobf.jar"))
 }
 

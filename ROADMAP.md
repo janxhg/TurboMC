@@ -111,10 +111,10 @@ Chunks (sequential, no padding)
 **Propósito:** Reducir overhead del formato NBT estándar.
 
 **Optimizaciones:**
-- [ ] Serialización binaria compacta (sin nombres redundantes)
-- [ ] Tablas de strings deduplicadas globalmente
-- [ ] Compresión LZ4 opcional
-- [ ] 30-50% reducción de tamaño vs NBT+GZIP
+- [x] Serialización binaria compacta (sin nombres redundantes)
+- [x] Tablas de strings deduplicadas globalmente
+- [x] Compresión LZ4 opcional
+- [x] 30-50% reducción de tamaño vs NBT+GZIP
 
 **API:**
 ```java
@@ -133,8 +133,8 @@ byte[] compressed = data.compress();
 3. Próxima carga: Lee directamente del `.bin` (50-70% más rápido)
 4. Invalidación automática si YAML cambia
 
-- [ ] `ConfigCacheBuilder`
-- [ ] Detección de cambios por hash
+- [x] `ConfigCacheManager` (ConfigCacheBuilder)
+- [x] Detección de cambios por hash
 - [ ] Migración automática de configs legacy
 
 ---

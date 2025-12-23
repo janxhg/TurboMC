@@ -1,10 +1,38 @@
-# TurboMC v1.8.0 — Advanced Storage & Performance Engine
+# TurboMC v1.9.0 — Advanced Storage & Performance Engine
 
 ## 🚀 Overview
 TurboMC es un fork avanzado de PaperMC enfocado en **alto rendimiento**, **almacenamiento moderno** y **estabilidad extrema**, diseñado para servidores con alta carga de chunks, entidades y tráfico de red.
 
+
+## 💾 Advanced Converters (v1.9.0)
+
+### NBT Packed-Binary Format (Internal)
+**Estado:** Implementado & Validado
+**Paquete:** `com.turbomc.nbt`
+
+Formato binario optimizado para almacenamiento interno de NBT.
+
+> [!IMPORTANT]
+> **Compatibilidad Garantizada:** Aislamiento total. 
+> `NBT (Paper/Plugins)` ↔ `NBTConverter` ↔ `PackedBinaryNBT (Turbo Interno)`
+
+- **Plugins:** Interactúan solo con NBT estándar (`CompoundTag`).
+- **Turbo:** Usa `PackedBinary` solo internamente para I/O.
+- **Features:** Deduplicación de strings, compresión LZ4, Header Magic `TNBT`.
+
+### Binary Config Cache
+**Estado:** Activo (Auto-habilitado)
+**Paquete:** `com.turbomc.config.cache`
+
+Sistema de caché binaria para `paper-global.yml` y futuras configs.
+
+- **Automático:** Se activa al iniciar el servidor.
+- **Rendimiento:** Carga 50% más rápida (lectura binaria vs parseo YAML).
+- **Auto-Update:** Hash SHA-256 detecta cambios en el YAML y regenera la caché.
+
 ---
 
+### (1.8.0)
 ## 🧱 Linear Region Format (LRF)
 
 ### Core
@@ -43,6 +71,7 @@ TurboMC es un fork avanzado de PaperMC enfocado en **alto rendimiento**, **almac
 - Pools de threads dedicados para I/O
 
 ---
+
 
 ## 🧠 Gestión de Calidad
 - Presets: LOW / MEDIUM / HIGH / ULTRA / DYNAMIC
