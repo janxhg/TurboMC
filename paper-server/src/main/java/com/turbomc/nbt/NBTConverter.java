@@ -1,5 +1,6 @@
 package com.turbomc.nbt;
 
+import java.lang.foreign.ValueLayout;
 import net.minecraft.nbt.*;
 import java.io.*;
 import java.util.List;
@@ -30,7 +31,8 @@ public class NBTConverter {
      * Converts PackedBinaryNBT back to a standard CompoundTag.
      */
     public static CompoundTag fromPackedBinary(PackedBinaryNBT packed) {
-        try (DataInputStream dis = new DataInputStream(new ByteArrayInputStream(packed.getPayload()))) {
+        java.nio.ByteBuffer buffer = packed.getPayload().asByteBuffer();
+        try (DataInputStream dis = new DataInputStream(new com.turbomc.nbt.ByteBufferInputStream(buffer))) {
             Tag tag = readTag(dis, packed.getStringPool());
             if (tag instanceof CompoundTag) {
                 return (CompoundTag) tag;

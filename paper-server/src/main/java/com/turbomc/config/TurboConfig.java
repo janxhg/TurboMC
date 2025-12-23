@@ -99,6 +99,10 @@ public class TurboConfig {
                 # Enable fallback to zlib if LZ4 decompression fails
                 fallback-enabled = true
                 
+                # Re-compress existing data when loaded if settings change (e.g. higher level)
+                # Warning: Increases disk I/O as chunks are rewritten with new settings.
+                recompress-on-load = false
+                
                 [storage]
                 # Region file format: "auto" (detect), "lrf" (optimized), or "mca" (vanilla)
                 format = "lrf"
@@ -218,6 +222,13 @@ public class TurboConfig {
                 
                 # Hopper optimization
                 hopper_optimization_enabled = true
+                
+                # Mob AI and Sensor throttling
+                mob_throttling_enabled = true
+                
+                # Global Tick Budgeting (in milliseconds)
+                global_budget_enabled = true
+                tick_budget_ms = 45.0
                 
                 # Mob spawning optimization
                 mob_spawning_optimization_enabled = true
@@ -422,40 +433,9 @@ public class TurboConfig {
             
             // Create a temporary TOML from the map - convert to TOML string format
             StringBuilder tomlBuilder = new StringBuilder();
-            if (tomlMap.containsKey("compression")) {
-                Map<String, Object> comp = (Map<String, Object>) tomlMap.get("compression");
-                tomlBuilder.append("[compression]\n");
-                for (Map.Entry<String, Object> entry : comp.entrySet()) {
-                    tomlBuilder.append(entry.getKey()).append(" = ").append(entry.getValue()).append("\n");
-                }
-            }
-            if (tomlMap.containsKey("storage")) {
-                Map<String, Object> storageSection = (Map<String, Object>) tomlMap.get("storage");
-                tomlBuilder.append("[storage]\n");
-                
-                // Write main storage properties
-                for (Map.Entry<String, Object> entry : storageSection.entrySet()) {
-                    String key = entry.getKey();
-                    Object value = entry.getValue();
-                    
-                    if (value instanceof Map) {
-                        // Handle nested sections (batch, mmap, integrity)
-                        Map<String, Object> nested = (Map<String, Object>) value;
-                        tomlBuilder.append("\n[storage.").append(key).append("]\n");
-                        for (Map.Entry<String, Object> nestedEntry : nested.entrySet()) {
-                            tomlBuilder.append(nestedEntry.getKey()).append(" = ").append(nestedEntry.getValue()).append("\n");
-                        }
-                    } else {
-                        // Handle direct storage properties
-                        tomlBuilder.append(key).append(" = ").append(value).append("\n");
-                    }
-                }
-            }
-            if (tomlMap.containsKey("version-control")) {
-                Map<String, Object> version = (Map<String, Object>) tomlMap.get("version-control");
-                tomlBuilder.append("[version-control]\n");
-                for (Map.Entry<String, Object> entry : version.entrySet()) {
-                    tomlBuilder.append(entry.getKey()).append(" = ").append(entry.getValue()).append("\n");
+            for (Map.Entry<String, Object> entry : tomlMap.entrySet()) {
+                if (entry.getValue() instanceof Map) {
+                    writeSection(tomlBuilder, entry.getKey(), (Map<String, Object>) entry.getValue());
                 }
             }
             return new Toml().read(tomlBuilder.toString());
@@ -465,6 +445,21 @@ public class TurboConfig {
             createDefaultConfig();
             return new Toml().read(configFile);
         }
+    }
+
+    private void writeSection(StringBuilder sb, String name, Map<String, Object> map) {
+        sb.append("[").append(name).append("]\n");
+        for (Map.Entry<String, Object> entry : map.entrySet()) {
+            Object val = entry.getValue();
+            if (val instanceof Map) {
+                // Use recursion for nested sections like storage.batch
+                writeSection(sb, name + "." + entry.getKey(), (Map<String, Object>) val);
+            } else {
+                String valStr = (val instanceof String) ? "\"" + val + "\"" : String.valueOf(val);
+                sb.append(entry.getKey()).append(" = ").append(valStr).append("\n");
+            }
+        }
+        sb.append("\n");
     }
     
     // === Compression Settings ===
@@ -483,6 +478,10 @@ public class TurboConfig {
     
     public boolean isFallbackEnabled() {
         return toml.getBoolean("compression.fallback-enabled", true);
+    }
+    
+    public boolean isRecompressOnLoadEnabled() {
+        return toml.getBoolean("compression.recompress-on-load", false);
     }
     
     // === Storage Settings ===
@@ -637,8 +636,20 @@ public class TurboConfig {
         return toml.getList("version-control.blocked-versions", List.of());
     }
     
-    public boolean isHopperOptimizationEnabled() {
-        return toml.getBoolean("fps.hopper_optimization_enabled", true);
+    public static boolean isHopperOptimizationEnabled() {
+        return getInstance().getBoolean("fps.hopper_optimization_enabled", true);
+    }
+
+    public static boolean isMobThrottlingEnabled() {
+        return getInstance().getBoolean("fps.mob_throttling_enabled", true);
+    }
+
+    public static double getTickBudgetMs() {
+        return getInstance().toml.getDouble("fps.tick_budget_ms", 45.0);
+    }
+
+    public static boolean isGlobalBudgetEnabled() {
+        return getInstance().getBoolean("fps.global_budget_enabled", true);
     }
     
     // Generic getter methods for any configuration value

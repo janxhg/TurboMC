@@ -244,6 +244,7 @@ tasks.compileTestJava {
 tasks.withType<JavaCompile>().configureEach {
     options.forkOptions.memoryMaximumSize = "1G"
     options.compilerArgs.add("--add-modules=jdk.incubator.vector")
+    options.compilerArgs.add("--enable-preview")
 }
 
 val scanJarForBadCalls by tasks.registering(io.papermc.paperweight.tasks.ScanJarForBadCalls::class) {
@@ -283,6 +284,7 @@ tasks.test {
     provider.fileCollection.from(mockitoAgent)
     jvmArgumentProviders.add(provider)
     jvmArgs("--add-modules=jdk.incubator.vector")
+    jvmArgs("--enable-preview")
 }
 
 val generatedDir: java.nio.file.Path = layout.projectDirectory.dir("src/generated/java").asFile.toPath()

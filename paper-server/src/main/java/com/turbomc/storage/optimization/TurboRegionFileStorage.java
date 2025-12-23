@@ -17,6 +17,9 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
+import java.util.Collections;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletableFuture;
 import javax.annotation.Nullable;
 
@@ -42,6 +45,7 @@ public class TurboRegionFileStorage extends RegionFileStorage {
     private final Path regionFolder;
     private final boolean verbose;
     private final boolean useTurboFeatures;
+    private final Set<Long> recompressedChunks = Collections.newSetFromMap(new ConcurrentHashMap<>());
     
     public TurboRegionFileStorage(RegionStorageInfo info, Path folder, boolean sync) {
         super(info, folder, sync); // Call parent constructor
@@ -91,7 +95,19 @@ public class TurboRegionFileStorage extends RegionFileStorage {
 
             // If an LRF region already exists, always prefer it
             if (java.nio.file.Files.exists(lrfRegionPath)) {
-                return readFromLRF(lrfRegionPath, pos);
+                CompoundTag nbt = readFromLRF(lrfRegionPath, pos);
+                
+                // OPTIMIZATION: Trigger re-compression if enabled and not already done this session
+                if (nbt != null && config.isRecompressOnLoadEnabled() && !recompressedChunks.contains(pos.toLong())) {
+                    recompressedChunks.add(pos.toLong());
+                    // Since writeToLRF is non-blocking (async handoff), we can just call it
+                    write(pos, nbt);
+                    if (verbose) {
+                        System.out.println("[TurboMC][RegionStorage] Triggered lazy re-compression for " + pos);
+                    }
+                }
+                
+                return nbt;
             }
 
             // In ON_DEMAND mode targeting LRF, lazily migrate chunks from MCA
