@@ -98,17 +98,11 @@ public class LRFHeader {
      * @throws IllegalArgumentException if magic bytes don't match
      */
     public static LRFHeader read(ByteBuffer buffer) {
-        // Create cache key from buffer content hash
-        int bufferHash = java.util.Arrays.hashCode(Arrays.copyOf(buffer.array(), Math.min(buffer.limit(), 64)));
-        
-        // Check cache first
-        LRFHeader cached = headerCache.get(bufferHash);
-        if (cached != null) {
-            return cached;
-        }
-        
         // Verify magic bytes
         byte[] magic = new byte[LRFConstants.MAGIC_LENGTH];
+        if (buffer.remaining() < magic.length) {
+             throw new IllegalArgumentException("Buffer too small for LRF magic");
+        }
         buffer.get(magic);
         if (!Arrays.equals(magic, LRFConstants.MAGIC_BYTES)) {
             throw new IllegalArgumentException("Invalid LRF file: magic bytes mismatch");
@@ -121,11 +115,13 @@ public class LRFHeader {
         
         // Read offset table into compact storage
         ByteBuffer offsetTable = ByteBuffer.allocate(LRFConstants.OFFSETS_TABLE_SIZE);
-        buffer.get(offsetTable.array());
+        byte[] tableBytes = new byte[LRFConstants.OFFSETS_TABLE_SIZE];
+        buffer.get(tableBytes);
+        offsetTable.put(tableBytes);
+        offsetTable.rewind();
         
         // Build chunk existence array
         boolean[] chunkExists = new boolean[LRFConstants.CHUNKS_PER_REGION];
-        offsetTable.rewind();
         for (int i = 0; i < LRFConstants.CHUNKS_PER_REGION; i++) {
             int entry = offsetTable.getInt();
             int sizeSectors = entry & 0xFF;
@@ -136,17 +132,13 @@ public class LRFHeader {
         // Skip any remaining header padding
         int remaining = LRFConstants.HEADER_SIZE - buffer.position();
         if (remaining > 0) {
-            buffer.position(buffer.position() + remaining);
+            // Check if we can safely skip
+            if (buffer.remaining() >= remaining) {
+                buffer.position(buffer.position() + remaining);
+            }
         }
         
-        LRFHeader header = new LRFHeader(version, chunkCount, compressionType, offsetTable, chunkExists);
-        
-        // Cache the result (limit cache size)
-        if (headerCache.size() < LRFConstants.CACHE_SIZE) {
-            headerCache.put(bufferHash, header);
-        }
-        
-        return header;
+        return new LRFHeader(version, chunkCount, compressionType, offsetTable, chunkExists);
     }
     
     /**
@@ -257,6 +249,17 @@ public class LRFHeader {
         
         // Update existence flag
         chunkExists[index] = size > 0;
+    }
+    
+    /**
+     * Get total number of chunks defined in this header.
+     */
+    public int countChunks() {
+        int count = 0;
+        for (boolean exists : chunkExists) {
+            if (exists) count++;
+        }
+        return count;
     }
     
     /**

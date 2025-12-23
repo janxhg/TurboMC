@@ -144,7 +144,7 @@ abstract class MockitoAgentProvider : CommandLineArgumentProvider {
 }
 
 dependencies {
-    implementation(project(":paper-api"))
+    implementation(project(":turbo-api"))
     implementation("ca.spottedleaf:concurrentutil:0.0.7")
     implementation("org.jline:jline-terminal-ffm:3.27.1") // use ffm on java 22+
     implementation("org.jline:jline-terminal-jni:3.27.1") // fall back to jni on java 21
@@ -377,7 +377,7 @@ tasks.registerRunTask("runReobfPaperclip") {
 }
 
 fill {
-    project("turbomc")
+    project("turbo")
     versionFamily(paperweight.minecraftVersion.map { it.split(".", "-").takeWhile { part -> part.toIntOrNull() != null }.take(2).joinToString(".") })
     version(paperweight.minecraftVersion)
 

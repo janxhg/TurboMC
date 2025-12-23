@@ -1,4 +1,4 @@
-package com.turbomc.storage;
+package com.turbomc.storage.optimization;
 
 import com.turbomc.config.TurboConfig;
 import com.turbomc.storage.integrity.ChunkIntegrityValidator.ChecksumAlgorithm;
@@ -87,6 +87,20 @@ public class TurboStorageManager implements AutoCloseable {
             }
         }
         return result;
+    }
+    
+    /**
+     * Resets the singleton instance for testing purposes.
+     */
+    public static void resetInstance() {
+        synchronized (INSTANCE_LOCK) {
+            if (instance != null) {
+                try {
+                    instance.close();
+                } catch (Exception ignored) {}
+                instance = null;
+            }
+        }
     }
     
     /**
@@ -205,21 +219,15 @@ public class TurboStorageManager implements AutoCloseable {
         
         LRFChunkEntry chunk = new LRFChunkEntry(chunkX, chunkZ, data);
         
-        // Validate integrity before saving if enabled
+        // Update integrity checksum after saving if enabled
         if (integrityEnabled) {
-            ChunkIntegrityValidator validator = getIntegrityValidator(regionPath);
-            if (validator != null) {
-                return validator.validateChunk(chunkX, chunkZ, data)
-                    .thenCompose(report -> {
-                        if (report.isCorrupted()) {
-                            System.err.println("[TurboMC][Storage] Not saving corrupted chunk: " + report.getMessage());
-                            return CompletableFuture.completedFuture(null);
-                        }
-                        
-                        // Proceed with saving
-                        return saveChunkInternal(regionPath, chunk);
-                    });
-            }
+            return saveChunkInternal(regionPath, chunk)
+                .thenAccept(v -> {
+                    ChunkIntegrityValidator validator = getIntegrityValidator(regionPath);
+                    if (validator != null) {
+                        validator.updateChecksum(chunkX, chunkZ, data);
+                    }
+                });
         }
         
         return saveChunkInternal(regionPath, chunk);
@@ -249,6 +257,20 @@ public class TurboStorageManager implements AutoCloseable {
                 throw new RuntimeException(e);
             }
         });
+    }
+    
+    /**
+     * Flush all pending writes for a region.
+     * 
+     * @param regionPath Path to the region file
+     * @return CompletableFuture that completes when flush is done
+     */
+    public CompletableFuture<Void> flush(Path regionPath) {
+        ChunkBatchSaver saver = batchSavers.get(regionPath);
+        if (saver != null) {
+            return saver.flushBatch();
+        }
+        return CompletableFuture.completedFuture(null);
     }
     
     /**

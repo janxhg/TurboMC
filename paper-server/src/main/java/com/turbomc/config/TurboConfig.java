@@ -59,6 +59,15 @@ public class TurboConfig {
         }
         return instance;
     }
+    
+    /**
+     * Resets the singleton instance for testing purposes.
+     */
+    public static void resetInstance() {
+        synchronized (INSTANCE_LOCK) {
+            instance = null;
+        }
+    }
 
     public static TurboConfig get() {
         return getInstance();

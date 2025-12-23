@@ -158,10 +158,74 @@ public final class ValidationUtils {
             throw new IllegalArgumentException("Path does not exist: " + path);
         }
         
-        // Check for invalid characters in path
+        // Check for directory traversal
         String pathString = path.toString();
-        if (pathString.contains("..") && path.normalize().startsWith(path.normalize().resolve(".."))) {
-            throw new IllegalArgumentException("Path contains directory traversal: " + path);
+        if (pathString.contains("..")) {
+            for (java.nio.file.Path part : path) {
+                if (part.toString().equals("..")) {
+                    throw new IllegalArgumentException("Path contains directory traversal (..): " + path);
+                }
+            }
+        }
+    }
+
+    /**
+     * Validate file path parameter (alias for validatePath with mustExist=false).
+     * 
+     * @param path File path to validate
+     * @throws IllegalArgumentException if path is invalid
+     */
+    public static void validateFilePath(java.nio.file.Path path) {
+        validatePath(path, false);
+    }
+    
+    /**
+     * Validate byte array parameter.
+     * 
+     * @param array Array to validate
+     * @param minLength Minimum allowed length
+     * @throws IllegalArgumentException if array is invalid
+     */
+    public static void validateByteArray(byte[] array, int minLength) {
+        if (array == null) {
+            throw new IllegalArgumentException("Array cannot be null");
+        }
+        if (array.length < minLength) {
+            throw new IllegalArgumentException("Array too small: " + array.length + ". Minimum: " + minLength);
+        }
+    }
+    
+    /**
+     * Validate string length.
+     * 
+     * @param value String value to validate
+     * @param min Minimum length
+     * @param max Maximum length
+     * @throws IllegalArgumentException if string length is invalid
+     */
+    public static void validateStringLength(String value, int min, int max) {
+        if (value == null) {
+            throw new IllegalArgumentException("String cannot be null");
+        }
+        int length = value.length();
+        if (length < min || length > max) {
+            throw new IllegalArgumentException(
+                String.format("String length %d out of range [%d, %d]", length, min, max));
+        }
+    }
+    
+    /**
+     * Validate integer range.
+     * 
+     * @param value Value to validate
+     * @param min Minimum value
+     * @param max Maximum value
+     * @throws IllegalArgumentException if value is out of range
+     */
+    public static void validateRange(int value, int min, int max) {
+        if (value < min || value > max) {
+            throw new IllegalArgumentException(
+                String.format("Value %d out of range [%d, %d]", value, min, max));
         }
     }
     

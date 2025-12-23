@@ -37,7 +37,7 @@ public class ChunkBatchSaver implements AutoCloseable {
     private final ExecutorService compressionExecutor;
     private final ExecutorService writeExecutor;
     private final List<LRFChunkEntry> pendingChunks;
-    private final List<CompletableFuture<Void>> writeFutures;
+    private final List<CompletableFuture<Void>> chunkFutures;
     private final AtomicBoolean isClosed;
     private final AtomicInteger chunksSaved;
     private final AtomicInteger chunksCompressed;
@@ -60,7 +60,7 @@ public class ChunkBatchSaver implements AutoCloseable {
     public ChunkBatchSaver(Path regionPath, int compressionType) {
         this(regionPath, compressionType, 
              Runtime.getRuntime().availableProcessors() / 2,
-             Math.max(1, Runtime.getRuntime().availableProcessors() / 4),
+             1, // Force single writer thread per region to prevent corruption
              64);
     }
     
@@ -111,7 +111,7 @@ public class ChunkBatchSaver implements AutoCloseable {
         });
         
         this.pendingChunks = new ArrayList<>(batchSize);
-        this.writeFutures = new ArrayList<>();
+        this.chunkFutures = new ArrayList<>();
         this.isClosed = new AtomicBoolean(false);
         this.chunksSaved = new AtomicInteger(0);
         this.chunksCompressed = new AtomicInteger(0);
@@ -136,31 +136,20 @@ public class ChunkBatchSaver implements AutoCloseable {
             throw new IllegalStateException("ChunkBatchSaver is closed");
         }
         
+        CompletableFuture<Void> completionFuture = new CompletableFuture<>();
         synchronized (pendingChunks) {
             pendingChunks.add(chunk);
+            chunkFutures.add(completionFuture);
             
-            // Smart auto-flush: check if batch is full AND enough time has passed
             if (pendingChunks.size() >= batchSize) {
-                long timeSinceLastFlush = System.currentTimeMillis() - lastFlushTime;
-                if (timeSinceLastFlush >= autoFlushDelayMs) {
-                    lastFlushTime = System.currentTimeMillis();
-                    return flushBatch();
-                } else {
-                    // Schedule delayed flush to allow more chunks to accumulate
-                    return CompletableFuture
-                        .runAsync(() -> {
-                            try {
-                                Thread.sleep(autoFlushDelayMs - timeSinceLastFlush);
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
-                            }
-                        })
-                        .thenCompose(v -> flushBatch());
-                }
+                flushBatch();
+            } else if (pendingChunks.size() == 1) {
+                // First chunk in batch, schedule a flush after delay
+                CompletableFuture.delayedExecutor(autoFlushDelayMs, TimeUnit.MILLISECONDS)
+                    .execute(this::flushBatch);
             }
         }
-        
-        return CompletableFuture.completedFuture(null);
+        return completionFuture;
     }
     
     /**
@@ -198,6 +187,7 @@ public class ChunkBatchSaver implements AutoCloseable {
      */
     public CompletableFuture<Void> flushBatch() {
         List<LRFChunkEntry> currentBatch;
+        List<CompletableFuture<Void>> currentFutures;
         
         synchronized (pendingChunks) {
             if (pendingChunks.isEmpty()) {
@@ -205,7 +195,10 @@ public class ChunkBatchSaver implements AutoCloseable {
             }
             
             currentBatch = new ArrayList<>(pendingChunks);
+            currentFutures = new ArrayList<>(chunkFutures);
             pendingChunks.clear();
+            chunkFutures.clear();
+            lastFlushTime = System.currentTimeMillis();
         }
         
         return CompletableFuture.completedFuture(null)
@@ -214,9 +207,10 @@ public class ChunkBatchSaver implements AutoCloseable {
             .whenComplete((result, throwable) -> {
                 if (throwable != null) {
                     System.err.println("[TurboMC] Error saving batch: " + throwable.getMessage());
-                    throwable.printStackTrace();
+                    for (CompletableFuture<Void> f : currentFutures) f.completeExceptionally(throwable);
                 } else {
                     chunksSaved.addAndGet(currentBatch.size());
+                    for (CompletableFuture<Void> f : currentFutures) f.complete(null);
                 }
             });
     }
@@ -312,7 +306,7 @@ public class ChunkBatchSaver implements AutoCloseable {
             flushBatch().get(timeout, unit);
             
             // Wait for all write futures
-            for (CompletableFuture<Void> future : writeFutures) {
+            for (CompletableFuture<Void> future : chunkFutures) {
                 future.get(timeout, unit);
             }
             

@@ -1,12 +1,12 @@
 package com.turbomc.commands;
 
-import com.turbomc.storage.TurboStorageManager;
-import com.turbomc.storage.TurboStorageHooks;
+import com.turbomc.storage.optimization.TurboStorageManager;
+import com.turbomc.storage.optimization.TurboStorageHooks;
 import com.turbomc.storage.integrity.ChunkIntegrityValidator;
 import com.turbomc.storage.mmap.MMapReadAheadEngine;
 import com.turbomc.storage.batch.ChunkBatchLoader;
 import com.turbomc.storage.batch.ChunkBatchSaver;
-import com.turbomc.storage.TurboRegionFileStorage;
+import com.turbomc.storage.optimization.TurboRegionFileStorage;
 import com.turbomc.storage.converter.RegionConverter;
 
 import java.util.concurrent.CompletableFuture;

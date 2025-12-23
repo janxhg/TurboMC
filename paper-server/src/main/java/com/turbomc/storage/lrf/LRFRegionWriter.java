@@ -52,18 +52,30 @@ public class LRFRegionWriter implements AutoCloseable {
         this.chunks = new ArrayList<>();
         this.headerWritten = false;
         
+        // Initialize header
+        if (file.length() < LRFConstants.HEADER_SIZE) {
+            file.setLength(LRFConstants.HEADER_SIZE);
+            this.streamingHeader = new LRFHeader(LRFConstants.FORMAT_VERSION, 0, compressionType);
+        } else {
+            // Load existing header to avoid overwriting
+            ByteBuffer headerBuffer = ByteBuffer.allocate(LRFConstants.HEADER_SIZE);
+            channel.read(headerBuffer, 0);
+            headerBuffer.flip();
+            this.streamingHeader = LRFHeader.read(headerBuffer);
+            
+            // SET POSITION TO END FOR APPEND
+            channel.position(channel.size());
+        }
+
         // Initialize performance components
         this.writeBuffer = ByteBuffer.allocate(LRFConstants.STREAM_BUFFER_SIZE);
         this.bytesWritten = new AtomicLong(0);
         this.chunksCompressed = new AtomicLong(0);
         this.compressionTime = new AtomicLong(0);
-        this.streamingMode = false;
+        this.streamingMode = true; // Default to streaming for updates
         
-        // Reserve space for header
-        file.setLength(LRFConstants.HEADER_SIZE);
-        
-        System.out.println("[TurboMC] Creating LRF region: " + filePath.getFileName() + 
-                         " (compression: " + LRFConstants.getCompressionName(compressionType) + ")");
+        System.out.println("[TurboMC] Opened LRF region for update: " + filePath.getFileName() + 
+                         " (size: " + file.length() + ")");
     }
     
     /**
@@ -151,26 +163,38 @@ public class LRFRegionWriter implements AutoCloseable {
             }
         }
         
-        // FIXED: Thread-safe file position management
+        // FIXED: Thread-safe file position management and ALIGNMENT (256 bytes)
         long currentPos;
         synchronized (channel) {
             currentPos = channel.position();
+            // Align to 256 bytes
+            if (currentPos % 256 != 0) {
+                currentPos = (currentPos / 256 + 1) * 256;
+                channel.position(currentPos);
+            }
             if (currentPos < LRFConstants.HEADER_SIZE) {
                 currentPos = LRFConstants.HEADER_SIZE;
                 channel.position(currentPos);
             }
+            
+            // Write length header (4 bytes) - Total length = 4 + compressedData.length
+            int totalLength = 4 + compressedData.length;
+            ByteBuffer lengthBuffer = ByteBuffer.allocate(4);
+            lengthBuffer.putInt(totalLength);
+            lengthBuffer.flip();
+            channel.write(lengthBuffer);
+            
+            // Write chunk data with buffer
+            writeWithBuffer(compressedData);
+            
+            // Update streaming header
+            streamingHeader.setChunkData(
+                chunk.getChunkX(),
+                chunk.getChunkZ(),
+                (int) currentPos,
+                totalLength
+            );
         }
-        
-        // Write chunk data with buffer
-        writeWithBuffer(compressedData);
-        
-        // Update streaming header
-        streamingHeader.setChunkData(
-            chunk.getChunkX(),
-            chunk.getChunkZ(),
-            (int) currentPos,
-            compressedData.length
-        );
         
         // Update statistics
         chunksCompressed.incrementAndGet();
@@ -221,10 +245,9 @@ public class LRFRegionWriter implements AutoCloseable {
      * Flush streaming mode - write header with final offsets.
      */
     private void flushStreaming() throws IOException {
-        // Update chunk count in header
         LRFHeader finalHeader = new LRFHeader(
             LRFConstants.FORMAT_VERSION,
-            (int) chunksCompressed.get(),
+            streamingHeader.countChunks(),
             compressionType,
             streamingHeader.getOffsets(),
             streamingHeader.getSizes()
@@ -287,6 +310,19 @@ public class LRFRegionWriter implements AutoCloseable {
                 }
             }
             
+            // Align currentOffset to 256 bytes for next chunk
+            if (currentOffset % 256 != 0) {
+                currentOffset = (currentOffset / 256 + 1) * 256;
+                channel.position(currentOffset);
+            }
+            
+            // Write length header (4 bytes)
+            int totalLength = 4 + compressedData.length;
+            ByteBuffer lengthBuffer = ByteBuffer.allocate(4);
+            lengthBuffer.putInt(totalLength);
+            lengthBuffer.flip();
+            channel.write(lengthBuffer);
+            
             // Write chunk data
             writeWithBuffer(compressedData);
             
@@ -295,10 +331,10 @@ public class LRFRegionWriter implements AutoCloseable {
                 chunk.getChunkX(),
                 chunk.getChunkZ(),
                 currentOffset,
-                compressedData.length
+                totalLength
             );
             
-            currentOffset += compressedData.length;
+            currentOffset += totalLength;
             
             // Update statistics
             chunksCompressed.incrementAndGet();

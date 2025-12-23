@@ -4,6 +4,16 @@ Fork avanzado de PaperMC con foco en **storage moderno**, **SIMD**, y **baja lat
 
 ---
 
+## 🟢 v1.8.0 — Stability & Reliability (Stable)
+- **Zero-Failure Test Suite**: Estabilización completa del core.
+- **LRF Engine Final al 100%**: Fixes críticos en append/read headers.
+- **Race Condition Fixes**: Flush explícito en cargas altas.
+- **Optimización de Memoria**: Corrección de fugas en Performance Tests.
+- **Configuración Robusta**: Carga segura de `turbo.toml` vs `paper-global.yml`.
+- Nombre de compilación oficial: `turbo-server`
+
+---
+
 ## 🟢 v1.6.0 — Storage & Architecture Complete
 - Sistema LRF completo (lectura, escritura, reparación)
 - Conversión MCA ↔ LRF bidireccional

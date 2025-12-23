@@ -1,7 +1,7 @@
 package com.turbomc.performance;
 
 import com.turbomc.config.TurboConfig;
-import com.turbomc.storage.TurboStorageManager;
+import com.turbomc.storage.optimization.TurboStorageManager;
 import com.turbomc.storage.batch.ChunkBatchLoader;
 import com.turbomc.storage.cache.HybridChunkCache;
 

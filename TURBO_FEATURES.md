@@ -1,4 +1,4 @@
-# TurboMC v1.6.0 — Advanced Storage & Performance Engine
+# TurboMC v1.8.0 — Advanced Storage & Performance Engine
 
 ## 🚀 Overview
 TurboMC es un fork avanzado de PaperMC enfocado en **alto rendimiento**, **almacenamiento moderno** y **estabilidad extrema**, diseñado para servidores con alta carga de chunks, entidades y tráfico de red.

@@ -308,47 +308,16 @@ public class ChunkBatchLoader implements AutoCloseable {
     
     /**
      * Decompress chunk data if needed.
+     * Note: Current LRFRegionReader already handles decompression and timestamp splitting.
      */
     private CompletableFuture<LRFChunkEntry> decompressChunk(LRFChunkEntry chunk) {
         if (chunk == null) {
             return CompletableFuture.completedFuture(null);
         }
         
-        return CompletableFuture.supplyAsync(() -> {
-            long startTime = System.currentTimeMillis();
-            
-            try {
-                byte[] data = chunk.getData();
-                
-                // Check if data needs decompression
-                // LZ4 compressed data typically starts with specific magic bytes
-                boolean needsDecompression = data.length > 4 && 
-                    (data[0] == 0x04 || data[0] == 0x02); // LZ4 frame markers
-                
-                if (needsDecompression) {
-                    byte[] decompressed = TurboCompressionService.getInstance().decompress(data);
-                    
-                    // Remove timestamp from end if present (8 bytes)
-                    if (decompressed.length > 8) {
-                        byte[] chunkData = new byte[decompressed.length - 8];
-                        System.arraycopy(decompressed, 0, chunkData, 0, chunkData.length);
-                        long timestamp = ByteBuffer.wrap(decompressed, decompressed.length - 8, 8).getLong();
-                        return new LRFChunkEntry(chunk.getChunkX(), chunk.getChunkZ(), chunkData, timestamp);
-                    }
-                    
-                    return new LRFChunkEntry(chunk.getChunkX(), chunk.getChunkZ(), decompressed);
-                }
-                
-                chunksDecompressed.incrementAndGet();
-                totalDecompressionTime.addAndGet(System.currentTimeMillis() - startTime);
-                return chunk;
-                
-            } catch (Exception e) {
-                System.err.println("[TurboMC] Failed to decompress chunk " + 
-                                 chunk.getChunkX() + "," + chunk.getChunkZ() + ": " + e.getMessage());
-                return chunk; // Return original chunk if decompression fails
-            }
-        }, decompressionExecutor);
+        // Stats update only
+        chunksDecompressed.incrementAndGet();
+        return CompletableFuture.completedFuture(chunk);
     }
     
     /**

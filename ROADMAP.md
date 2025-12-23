@@ -19,8 +19,8 @@
 ---
 
 ## 📅 Version Status
-**Current Stable:** v1.5.0 (LRF Stable)
-**Next Milestone:** v1.6.0 (Tools & Profiling)
+**Current Stable:** v1.8.0 (Zero-Failure Stability)
+**Next Milestone:** v1.9.0 (Profiling & Tools)
 
 ---
 

@@ -55,31 +55,51 @@ public class LRFRegionReader implements AutoCloseable {
         
         long fileSize = channel.size();
         
-        // Map the entire file strictly read-only
-        // Note: For extremely large files > 2GB this might need chunked mapping, 
-        // but Minecraft regions are rarely that big (max 32x32 chunks * 1MB = ~1GB).
-        this.mappedBuffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
+        // Respect configuration for Memory Mapping
+        boolean mmapEnabled = com.turbomc.config.TurboConfig.getInstance().getBoolean("storage.mmap.enabled", true);
+        
+        MappedByteBuffer tempBuffer = null;
+        if (mmapEnabled) {
+            try {
+                tempBuffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
+                System.out.println("[TurboMC] Opened LRF region (mmap): " + filePath.getFileName());
+            } catch (IOException e) {
+                System.err.println("[TurboMC] Failed to mmap LRF region, falling back to standard I/O: " + e.getMessage());
+            }
+        }
+        this.mappedBuffer = tempBuffer;
+        
+        // Initialize statistics BEFORE header reading (in case it fails and triggers close())
+        this.chunkCache = new Int2ObjectOpenHashMap<>();
+        this.cacheHits = new AtomicLong(0);
+        this.cacheMisses = new AtomicLong(0);
         
         // Read and validate header (first 256 bytes)
-        // Slice a duplicate to avoid modifying position of main buffer if we needed concurrent access locally
-        ByteBuffer headerBuffer = mappedBuffer.slice(); 
-        headerBuffer.limit(LRFConstants.HEADER_SIZE);
+        ByteBuffer headerBuffer = ByteBuffer.allocate(LRFConstants.HEADER_SIZE);
+        if (mappedBuffer != null) {
+            ByteBuffer slice = mappedBuffer.slice();
+            slice.limit(LRFConstants.HEADER_SIZE);
+            headerBuffer.put(slice);
+            headerBuffer.rewind();
+        } else {
+            channel.read(headerBuffer, 0);
+            headerBuffer.rewind();
+        }
         
         try {
             this.header = LRFHeader.read(headerBuffer);
         } catch (IllegalArgumentException e) {
             close();
-            throw new IOException("Invalid LRF file: " + filePath, e);
+            throw new IOException("Corrupted LRF header or invalid magic bytes: " + e.getMessage(), e);
         }
         
         // Initialize performance components
-        this.chunkCache = new Int2ObjectOpenHashMap<>(LRFConstants.CACHE_SIZE);
-        this.cacheHits = new AtomicLong(0);
-        this.cacheMisses = new AtomicLong(0);
+
         
-        System.out.println("[TurboMC] Opened LRF region (mmap): " + filePath.getFileName() + 
-                         " (" + header.getChunkCount() + " chunks, " + 
-                         LRFConstants.getCompressionName(header.getCompressionType()) + ")");
+        if (mappedBuffer == null) {
+            System.out.println("[TurboMC] Opened LRF region (standard IO): " + filePath.getFileName() + 
+                             " (" + header.getChunkCount() + " chunks)");
+        }
     }
     
     /**
@@ -114,44 +134,38 @@ public class LRFRegionReader implements AutoCloseable {
         int size = header.getChunkSize(chunkX, chunkZ);
         
         if (size <= 0 || size > LRFConstants.MAX_CHUNK_SIZE) {
-            throw new IOException("Invalid chunk size: " + size + " bytes");
+            return null;
         }
         
-        // Zero-copy read from mmap
-        // Note: 'size' from header is the full sector aligned size
         byte[] rawSectorData = new byte[size];
         
-        // Duplicate buffer to allow thread-safe position changes
-        ByteBuffer threadLocalBuffer = mappedBuffer.duplicate();
-        threadLocalBuffer.position(offset);
-        threadLocalBuffer.get(rawSectorData);
+        if (mappedBuffer != null) {
+            // Zero-copy read from mmap
+            ByteBuffer threadLocalBuffer = mappedBuffer.duplicate();
+            threadLocalBuffer.position(offset);
+            threadLocalBuffer.get(rawSectorData);
+        } else {
+            // Standard I/O read
+            ByteBuffer readBuffer = ByteBuffer.wrap(rawSectorData);
+            channel.read(readBuffer, offset);
+        }
         
         // Parse Length Header (First 4 bytes)
-        // LRF v1.1: [Length (4b)][Data...][Timestamp (8b)]
         if (size < 4) return null;
         
-        // Manual Int read to avoid ByteBuffer allocation
-        int exactLength = ((rawSectorData[0] & 0xFF) << 24) | 
+        int totalLength = ((rawSectorData[0] & 0xFF) << 24) | 
                           ((rawSectorData[1] & 0xFF) << 16) | 
                           ((rawSectorData[2] & 0xFF) << 8) | 
                           (rawSectorData[3] & 0xFF);
-                          
-        // Enhanced validation with stricter bounds checking
-        if (exactLength <= 0 || exactLength > size - 4 || exactLength > LRFConstants.MAX_CHUNK_SIZE) {
-             // If invalid, we cannot trust this chunk.
-             // This might happen if reading an old chunk format (v1.0)
-             // But treating it as v1.1 is safer than crashing Zstd.
+                           
+        if (totalLength <= 4 || totalLength > size || totalLength > LRFConstants.MAX_CHUNK_SIZE) {
              return null; 
         }
         
-        if (exactLength < 8) return null; // Too small for timestamp
+        int compressedPayloadSize = totalLength - 4;
+        byte[] compressedPayload = new byte[compressedPayloadSize];
+        System.arraycopy(rawSectorData, 4, compressedPayload, 0, compressedPayloadSize);
         
-        // Payload is Data ONLY (excluding timestamp)
-        int payloadSize = exactLength - 8;
-        byte[] compressedPayload = new byte[payloadSize];
-        System.arraycopy(rawSectorData, 4, compressedPayload, 0, payloadSize); // Offset 4
-        
-        // Decompress if needed
         byte[] data;
         if (header.getCompressionType() == LRFConstants.COMPRESSION_NONE) {
             data = compressedPayload;
@@ -159,9 +173,7 @@ public class LRFRegionReader implements AutoCloseable {
             data = TurboCompressionService.getInstance().decompress(compressedPayload);
         }
         
-        // FIXED: Cache with memory management
         synchronized (cacheLock) {
-            // Check memory limit before adding
             long newCacheSize = currentCacheSize.get() + data.length;
             if (newCacheSize <= MAX_CACHE_MEMORY && chunkCache.size() < LRFConstants.CACHE_SIZE) {
                 chunkCache.put(chunkIndex, data);
@@ -175,14 +187,20 @@ public class LRFRegionReader implements AutoCloseable {
     /**
      * Helper method to create chunk entry.
      */
-    private LRFChunkEntry createChunkEntry(int chunkX, int chunkZ, byte[] data) {
-        // Timestamp is stored at the end of each chunk (8 bytes)
+    private LRFChunkEntry createChunkEntry(int chunkX, int chunkZ, byte[] fullDecompressedData) {
+        // Timestamp is stored at the end of each decompressed block (8 bytes)
         long timestamp = 0;
-        if (data.length >= 8) {
-            ByteBuffer tsBuffer = ByteBuffer.wrap(data, data.length - 8, 8);
+        byte[] pureNbtData = fullDecompressedData;
+        
+        if (fullDecompressedData.length >= 8) {
+            ByteBuffer tsBuffer = ByteBuffer.wrap(fullDecompressedData, fullDecompressedData.length - 8, 8);
             timestamp = tsBuffer.getLong();
+            
+            // Extract pure NBT data (everything except last 8 bytes)
+            pureNbtData = new byte[fullDecompressedData.length - 8];
+            System.arraycopy(fullDecompressedData, 0, pureNbtData, 0, pureNbtData.length);
         }
-        return new LRFChunkEntry(chunkX, chunkZ, data, timestamp);
+        return new LRFChunkEntry(chunkX, chunkZ, pureNbtData, timestamp);
     }
 
     /**
@@ -263,10 +281,12 @@ public class LRFRegionReader implements AutoCloseable {
      */
     public void clearCache() {
         synchronized (cacheLock) {
-            chunkCache.clear();
+            if (chunkCache != null) {
+                chunkCache.clear();
+            }
         }
         cacheHits.set(0);
-        cacheMisses.set(0);
+        cacheMisses.getAndSet(0);
     }
     
     public static class CacheStats {

@@ -224,7 +224,7 @@ public final class TurboCommandRegistry {
     
     private static void handleStorageStats(CommandSender sender) {
         try {
-            com.turbomc.storage.TurboStorageManager.StorageManagerStats stats = com.turbomc.storage.TurboStorageHooks.getGlobalStats();
+            com.turbomc.storage.optimization.TurboStorageManager.StorageManagerStats stats = com.turbomc.storage.optimization.TurboStorageHooks.getGlobalStats();
             
             sender.sendMessage("§6=== TurboMC Storage Statistics ===");
             sender.sendMessage("§eActive Components:");

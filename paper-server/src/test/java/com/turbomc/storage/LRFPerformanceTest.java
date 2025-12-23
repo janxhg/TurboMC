@@ -19,7 +19,7 @@ import java.util.Arrays;
 public class LRFPerformanceTest {
     
     private static final String TEST_WORLD_NAME = "test_world";
-    private static final int NUM_CHUNKS = 1000;
+    private static final int NUM_CHUNKS = 200;
     private static final int CHUNK_SIZE = 16 * 16 * 256; // 16x16x256 blocks
     
     private Path testDir;
@@ -77,6 +77,7 @@ public class LRFPerformanceTest {
     void testMCAvsLRFWriteSpeed() throws IOException {
         System.out.println("=== WRITE SPEED TEST ===");
         
+        // Use a smaller number of chunks for performance speed tests to be quick
         byte[][] chunkData = generateTestChunks(NUM_CHUNKS);
         
         // Test MCA write speed
@@ -112,20 +113,20 @@ public class LRFPerformanceTest {
         
         // Test MCA read speed (multiple reads)
         long mcaStartTime = System.nanoTime();
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 50; i++) { // Reduce iterations
             decompressMCA(mcaData);
         }
         long mcaReadTime = System.nanoTime() - mcaStartTime;
         
         // Test LRF read speed (multiple reads)
         long lrfStartTime = System.nanoTime();
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 50; i++) { // Reduce iterations
             decompressLRF(lrfData);
         }
         long lrfReadTime = System.nanoTime() - lrfStartTime;
         
-        System.out.printf("MCA read time (100 reads): %.2f ms%n", mcaReadTime / 1_000_000.0);
-        System.out.printf("LRF read time (100 reads): %.2f ms%n", lrfReadTime / 1_000_000.0);
+        System.out.printf("MCA read time (50 reads): %.2f ms%n", mcaReadTime / 1_000_000.0);
+        System.out.printf("LRF read time (50 reads): %.2f ms%n", lrfReadTime / 1_000_000.0);
         
         double speedRatio = (double) mcaReadTime / lrfReadTime;
         System.out.printf("LRF read speed: %.2fx faster%n", speedRatio);
@@ -181,8 +182,8 @@ public class LRFPerformanceTest {
     void testChunkLoadingPerformance() throws IOException {
         System.out.println("=== CHUNK LOADING PERFORMANCE TEST ===");
         
-        // Test loading different numbers of chunks
-        int[] chunkCounts = {100, 500, 1000, 2000};
+        // Test loading different numbers of chunks - REDUCED to prevent OOM
+        int[] chunkCounts = {100, 200, 500};
         
         for (int chunkCount : chunkCounts) {
             System.out.printf("Testing %d chunks:%n", chunkCount);

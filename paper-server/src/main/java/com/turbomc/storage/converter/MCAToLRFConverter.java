@@ -222,9 +222,13 @@ public class MCAToLRFConverter {
         
         if (chunks.isEmpty()) {
             if (verbose) {
-                System.out.println("[TurboMC] Skipping empty region: " + mcaPath.getFileName());
+                System.out.println("[TurboMC] Creating empty LRF for empty MCA region: " + mcaPath.getFileName());
             }
-            return new ConversionResult(mcaPath, lrfPath, 0, 0, 0, 0);
+            // Create empty LRF file to satisfy migration verification
+            try (LRFRegionWriter writer = new LRFRegionWriter(lrfPath, compressionType)) {
+                writer.flush(); // Write empty header
+            }
+            return new ConversionResult(mcaPath, lrfPath, 0, 0, mcaSize, Files.size(lrfPath));
         }
         
         // Write chunks to LRF

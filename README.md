@@ -1,6 +1,6 @@
 # TurboMC 🚀
 
-**Versión 1.6.0**  
+**Versión 1.8.0 (Stable)**  
 Fork avanzado de **PaperMC 1.21.10** optimizado para **alto rendimiento**, **almacenamiento moderno** y **servidores exigentes**.
 
 [Changelog](./versions.md) · [Features](./TURBO_FEATURES.md)

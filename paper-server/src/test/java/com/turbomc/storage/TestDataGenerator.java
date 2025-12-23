@@ -1,5 +1,6 @@
 package com.turbomc.storage;
 
+import com.turbomc.storage.lrf.LRFChunkEntry;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;

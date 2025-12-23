@@ -174,13 +174,18 @@ public class ChunkIntegrityValidator implements AutoCloseable {
                 }
                 
                 int chunkIndex = LRFConstants.getChunkIndex(chunkX, chunkZ);
-                ChunkChecksum storedChecksum = checksums.get(chunkIndex);
+                ChunkChecksum storedChecksum;
+                synchronized (checksums) {
+                    storedChecksum = checksums.get(chunkIndex);
+                }
                 
                 if (storedChecksum == null) {
                     // First time seeing this chunk - calculate and store checksum
                     ChunkChecksum newChecksum = calculateChecksums(chunkX, chunkZ, data);
-                    checksums.put(chunkIndex, newChecksum);
-                    checksumStorageSize.addAndGet(estimateChecksumSize(newChecksum));
+                    synchronized (checksums) {
+                        checksums.put(chunkIndex, newChecksum);
+                        checksumStorageSize.addAndGet(estimateChecksumSize(newChecksum));
+                    }
                     lastValidationTime.put(chunkIndex, System.currentTimeMillis());
                     
                     return new IntegrityReport(chunkX, chunkZ, ValidationResult.VALID,
@@ -207,11 +212,13 @@ public class ChunkIntegrityValidator implements AutoCloseable {
                     message = "All checksums match";
                 } else if (!primaryValid && !backupValid) {
                     result = ValidationResult.CORRUPTED;
-                    message = "Primary and backup checksums mismatch";
+                    message = String.format("Primary and backup checksums mismatch for chunk [%d, %d]", chunkX, chunkZ);
+                    System.err.println("[TurboMC][Integrity] CORRUPTION: " + message);
                     chunksCorrupted.incrementAndGet();
                 } else {
                     result = ValidationResult.REPAIRABLE;
-                    message = "Checksum mismatch detected but repair may be possible";
+                    message = String.format("Partial mismatch for chunk [%d, %d]", chunkX, chunkZ);
+                    System.err.println("[TurboMC][Integrity] REPAIRABLE: " + message);
                 }
                 
                 lastValidationTime.put(chunkIndex, System.currentTimeMillis());
@@ -225,6 +232,27 @@ public class ChunkIntegrityValidator implements AutoCloseable {
                                          "Validation error: " + e.getMessage(), 0);
             }
         }, validationExecutor);
+    }
+    
+    /**
+     * Update the stored checksum for a chunk.
+     * Called after a successful save operation.
+     */
+    public void updateChecksum(int chunkX, int chunkZ, byte[] data) {
+        if (data == null || data.length == 0) return;
+        
+        int chunkIndex = LRFConstants.getChunkIndex(chunkX, chunkZ);
+        ChunkChecksum newChecksum = calculateChecksums(chunkX, chunkZ, data);
+        
+        synchronized (checksums) {
+            ChunkChecksum old = checksums.put(chunkIndex, newChecksum);
+            if (old != null) {
+                checksumStorageSize.addAndGet(estimateChecksumSize(newChecksum) - estimateChecksumSize(old));
+            } else {
+                checksumStorageSize.addAndGet(estimateChecksumSize(newChecksum));
+            }
+        }
+        lastValidationTime.put(chunkIndex, System.currentTimeMillis());
     }
     
     /**

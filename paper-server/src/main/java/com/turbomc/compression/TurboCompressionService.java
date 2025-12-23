@@ -50,6 +50,13 @@ public class TurboCompressionService {
         }
     }
     
+    /**
+     * Resets the singleton instance for testing purposes.
+     */
+    public static void resetInstance() {
+        instance = null;
+    }
+    
     public static TurboCompressionService getInstance() {
         if (instance == null) {
             throw new IllegalStateException("TurboCompressionService not initialized!");
