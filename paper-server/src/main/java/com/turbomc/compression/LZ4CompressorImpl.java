@@ -11,7 +11,7 @@ import java.nio.ByteBuffer;
  * Uses LZ4 block compression for fast compression/decompression.
  */
 public class LZ4CompressorImpl implements Compressor {
-    private static final byte MAGIC_BYTE = 0x02;
+    private static final byte MAGIC_BYTE = 0x4C; // FIXED: Match service expectation
     
     private final LZ4Compressor compressor;
     private final LZ4FastDecompressor decompressor;

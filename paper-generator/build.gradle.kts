@@ -15,11 +15,11 @@ val serverRuntimeClasspath by configurations.registering { // resolvable?
 }
 
 dependencies {
-    minecraftJar(project(":paper-server", "mappedJarOutgoing"))
-    implementation(project(":paper-server", "macheMinecraftLibraries"))
+    minecraftJar(project(":turbo-server", "mappedJarOutgoing"))
+    implementation(project(":turbo-server", "macheMinecraftLibraries"))
 
     implementation("com.squareup:javapoet:1.13.0")
-    implementation(project(":paper-api"))
+    implementation(project(":turbo-api"))
     implementation("io.papermc.typewriter:typewriter:1.0.1") {
         isTransitive = false // paper-api already have everything
     }
@@ -29,7 +29,7 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
-    serverRuntimeClasspath(project(":paper-server", "runtimeConfiguration"))
+    serverRuntimeClasspath(project(":turbo-server", "runtimeConfiguration"))
 }
 
 val gameVersion = providers.gradleProperty("mcVersion")

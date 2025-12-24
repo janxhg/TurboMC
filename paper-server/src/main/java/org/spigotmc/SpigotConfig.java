@@ -71,11 +71,26 @@ public class SpigotConfig {
         SpigotConfig.version = SpigotConfig.getInt("config-version", 12);
         SpigotConfig.set("config-version", 12);
         SpigotConfig.readConfig(SpigotConfig.class, null);
+        
+        // Initialize TurboMC LRF system
+        try {
+            com.turbomc.storage.optimization.TurboLRFBootstrap.initialize();
+        } catch (Exception e) {
+            System.err.println("[TurboMC] Failed to initialize LRF system: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 
     public static void registerCommands() {
         for (Map.Entry<String, Command> entry : SpigotConfig.commands.entrySet()) {
             MinecraftServer.getServer().server.getCommandMap().register(entry.getKey(), "Spigot", entry.getValue());
+        }
+        
+        // Register TurboMC commands
+        try {
+            com.turbomc.commands.TurboCommandRegistry.registerBukkitCommands();
+        } catch (Exception e) {
+            System.err.println("[TurboMC] Failed to register Bukkit commands: " + e.getMessage());
         }
     }
 

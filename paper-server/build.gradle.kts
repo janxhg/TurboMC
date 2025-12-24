@@ -1,6 +1,8 @@
 import io.papermc.fill.model.BuildChannel
 import io.papermc.paperweight.attribute.DevBundleOutput
 import io.papermc.paperweight.util.*
+import io.papermc.paperweight.tasks.CreatePaperclipJar
+import io.papermc.paperweight.tasks.CreateBundlerJar
 import java.time.Instant
 
 plugins {
@@ -25,13 +27,15 @@ dependencies {
     
     // TurboMC - Compression & Config (v1.2.0)
     implementation("org.lz4:lz4-java:1.8.0")
+    implementation("com.github.luben:zstd-jni:1.5.5-11")
     implementation("com.moandjiezana.toml:toml4j:0.7.2")
     
-    // TurboMC - ViaVersion Multi-Version Support (v1.3.0 - API compatibility work in progress)
-    // NOTE: ViaVersion 5.1.1 API has numerous breaking changes from previous versions.
-    // Integration will be completed in v1.3.0 after API adapter layer is implemented.
-    // implementation("com.viaversion:viaversion-common:5.1.1")
-    // implementation("com.viaversion:viabackwards-common:5.1.1")
+    // TurboMC - YAML Support for paper-global.yml fallback (v1.3.0)
+    implementation("org.yaml:snakeyaml:2.2")
+    
+    // TurboMC - ViaVersion Multi-Version Support (v1.6.0 - STABLE 4.9.0)
+    implementation("com.viaversion:viaversion-common:4.9.0")
+    implementation("com.viaversion:viabackwards-common:4.9.0")
 }
 
 paperweight {
@@ -142,7 +146,7 @@ abstract class MockitoAgentProvider : CommandLineArgumentProvider {
 }
 
 dependencies {
-    implementation(project(":paper-api"))
+    implementation(project(":turbo-api"))
     implementation("ca.spottedleaf:concurrentutil:0.0.7")
     implementation("org.jline:jline-terminal-ffm:3.27.1") // use ffm on java 22+
     implementation("org.jline:jline-terminal-jni:3.27.1") // fall back to jni on java 21
@@ -240,6 +244,7 @@ tasks.compileTestJava {
 tasks.withType<JavaCompile>().configureEach {
     options.forkOptions.memoryMaximumSize = "1G"
     options.compilerArgs.add("--add-modules=jdk.incubator.vector")
+    options.compilerArgs.add("--enable-preview")
 }
 
 val scanJarForBadCalls by tasks.registering(io.papermc.paperweight.tasks.ScanJarForBadCalls::class) {
@@ -266,7 +271,8 @@ tasks.jar {
 }
 
 tasks.test {
-    include("**/**TestSuite.class")
+    include("**/*Test.class")
+    include("**/*TestSuite.class")
     workingDir = temporaryDir
     useJUnitPlatform {
         forkEvery = 1
@@ -278,6 +284,7 @@ tasks.test {
     provider.fileCollection.from(mockitoAgent)
     jvmArgumentProviders.add(provider)
     jvmArgs("--add-modules=jdk.incubator.vector")
+    jvmArgs("--enable-preview")
 }
 
 val generatedDir: java.nio.file.Path = layout.projectDirectory.dir("src/generated/java").asFile.toPath()
@@ -374,7 +381,7 @@ tasks.registerRunTask("runReobfPaperclip") {
 }
 
 fill {
-    project("turbomc")
+    project("turbo")
     versionFamily(paperweight.minecraftVersion.map { it.split(".", "-").takeWhile { part -> part.toIntOrNull() != null }.take(2).joinToString(".") })
     version(paperweight.minecraftVersion)
 
@@ -404,5 +411,20 @@ tasks.createMojmapBundlerJar {
 // Fix for missing task dependency reported by Gradle 9+
 tasks.named("processResources") {
     dependsOn("applyResourcePatches")
+}
+
+// TurboMC: Force artifact renaming
+tasks.named<CreatePaperclipJar>("createMojmapPaperclipJar") {
+    outputZip.set(layout.buildDirectory.file("libs/turbo-paperclip-${project.version}.jar"))
+}
+tasks.named<CreateBundlerJar>("createMojmapBundlerJar") {
+    outputZip.set(layout.buildDirectory.file("libs/turbo-bundler-${project.version}.jar"))
+}
+// Reobf variants
+tasks.named<CreatePaperclipJar>("createReobfPaperclipJar") {
+    outputZip.set(layout.buildDirectory.file("libs/turbo-paperclip-${project.version}-reobf.jar"))
+}
+tasks.named<CreateBundlerJar>("createReobfBundlerJar") {
+    outputZip.set(layout.buildDirectory.file("libs/turbo-bundler-${project.version}-reobf.jar"))
 }
 

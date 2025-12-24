@@ -31,10 +31,12 @@ if (!file(".git").exists()) {
 
 rootProject.name = "turbomc"
 
-for (name in listOf("paper-api", "paper-server")) {
-    include(name)
-    file(name).mkdirs()
-}
+// Define TurboMC Project Structure
+include("turbo-api")
+project(":turbo-api").projectDir = file("paper-api")
+
+include("turbo-server")
+project(":turbo-server").projectDir = file("paper-server")
 
 optionalInclude("test-plugin")
 optionalInclude("paper-generator")

@@ -29,22 +29,32 @@ public class TurboCompressionService {
         this.fallbackEnabled = config.isFallbackEnabled();
         
         // Initialize primary compressor based on config
-        if ("lz4".equals(algorithm)) {
+        if ("zstd".equals(algorithm)) {
+            this.primaryCompressor = new ZstdCompressor(level);
+            this.fallbackCompressor = new ZlibCompressor(level); // Safer fallback than LZ4 for size
+        } else if ("lz4".equals(algorithm)) {
             this.primaryCompressor = new LZ4CompressorImpl(level);
             this.fallbackCompressor = new ZlibCompressor(level);
         } else {
             this.primaryCompressor = new ZlibCompressor(level);
-            this.fallbackCompressor = new LZ4CompressorImpl(level);
+            this.fallbackCompressor = new ZstdCompressor(Math.min(3, level)); // Try Zstd as fallback if available
         }
         
         System.out.println("[TurboMC] Compression initialized: " + primaryCompressor.getName() + 
                          " (level " + level + "), fallback " + (fallbackEnabled ? "enabled" : "disabled"));
     }
     
-    public static void initialize(TurboConfig config) {
+    public static synchronized void initialize(TurboConfig config) {
         if (instance == null) {
             instance = new TurboCompressionService(config);
         }
+    }
+    
+    /**
+     * Resets the singleton instance for testing purposes.
+     */
+    public static void resetInstance() {
+        instance = null;
     }
     
     public static TurboCompressionService getInstance() {
@@ -59,8 +69,9 @@ public class TurboCompressionService {
      *
      * @param data Raw data to compress
      * @return Compressed data with format header
+     * @throws CompressionException if compression fails and fallback is disabled
      */
-    public byte[] compress(byte[] data) {
+    public byte[] compress(byte[] data) throws CompressionException {
         if (data == null || data.length == 0) {
             return new byte[0];
         }
@@ -71,8 +82,25 @@ public class TurboCompressionService {
             compressedBytes.addAndGet(compressed.length);
             return compressed;
         } catch (CompressionException e) {
-            System.err.println("[TurboMC] Compression failed: " + e.getMessage());
-            return data; // Return original data if compression fails
+            System.err.println("[TurboMC] Primary compression failed: " + e.getMessage());
+            
+            // Try fallback compression if enabled
+            if (fallbackEnabled) {
+                try {
+                    System.out.println("[TurboMC] Trying fallback compression...");
+                    byte[] fallbackCompressed = fallbackCompressor.compress(data);
+                    compressionCount.incrementAndGet();
+                    compressedBytes.addAndGet(fallbackCompressed.length);
+                    fallbackCount.incrementAndGet();
+                    return fallbackCompressed;
+                } catch (CompressionException fallbackEx) {
+                    System.err.println("[TurboMC] Fallback compression also failed: " + fallbackEx.getMessage());
+                    throw new CompressionException("Both primary and fallback compression failed", e);
+                }
+            }
+            
+            // If no fallback or fallback failed, throw exception
+            throw new CompressionException("Compression failed: " + e.getMessage(), e);
         }
     }
     
@@ -83,7 +111,7 @@ public class TurboCompressionService {
      * @param compressed Compressed data
      * @return Decompressed data
      */
-    public byte[] decompress(byte[] compressed) {
+    public byte[] decompress(byte[] compressed) throws java.io.IOException {
         if (compressed == null || compressed.length == 0) {
             return new byte[0];
         }
@@ -113,8 +141,24 @@ public class TurboCompressionService {
                 }
             }
             
-            System.err.println("[TurboMC] Decompression failed: " + e.getMessage());
-            return compressed; // Return original data if all attempts fail
+            // Critical Change: Throw Exception instead of returning garbage
+            throw new java.io.IOException("Failed to decompress data (Magic: " + 
+                String.format("0x%02X", compressed[0]) + ")", e);
+        }
+    }
+    
+    // Static cache for compressor instances to avoid recreation
+    private static final java.util.Map<Byte, Compressor> MAGIC_BYTE_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+    
+    static {
+        // Pre-populate common compressors
+        try {
+            MAGIC_BYTE_CACHE.put((byte)0x54, new ZstdCompressor(3));
+            MAGIC_BYTE_CACHE.put((byte)0x4C, new LZ4CompressorImpl(3));
+            MAGIC_BYTE_CACHE.put((byte)0x78, new ZlibCompressor(3));
+        } catch (Exception e) {
+            // If compressor initialization fails, they won't be in cache
+            System.err.println("[TurboMC] Warning: Some compressors failed to initialize for cache");
         }
     }
     
@@ -130,7 +174,13 @@ public class TurboCompressionService {
         } else if (magicByte == fallbackCompressor.getMagicByte()) {
             return fallbackCompressor;
         } else {
-            // Unknown format, try primary compressor
+            // Check cached compressor instances
+            Compressor cached = MAGIC_BYTE_CACHE.get(magicByte);
+            if (cached != null) {
+                return cached;
+            }
+            
+            // Unknown format, try primary compressor as last resort
             System.out.println("[TurboMC] Unknown compression format (magic byte: 0x" + 
                              Integer.toHexString(magicByte & 0xFF) + "), using primary");
             return primaryCompressor;

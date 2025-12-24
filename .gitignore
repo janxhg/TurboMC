@@ -49,3 +49,15 @@ paper-generator.settings.gradle.kts
 
 # Don't track patched vanilla submodules
 paper-server/src/minecraft/
+
+# Java debugging and profiling files
+*.hprof
+*.dump
+heapdump*.hprof
+java_pid*.hprof
+*.log
+*.trace
+
+# Memory and performance analysis
+*.jfr
+*.prof

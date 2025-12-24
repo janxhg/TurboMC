@@ -1,40 +1,62 @@
 # TurboMC 🚀
 
-| TurboMC Version | Minecraft Version | Upstream            |
-|:---------------:|:-----------------:|:-------------------:|
-| **v1.2.0**      | **1.21.10**        | Fork of **PaperMC** |
+**Versión 2.2.0 (The Command & Stress Update)**  
+Fork avanzado de **PaperMC 1.21.10** optimizado para **velocidad extrema**, **almacenamiento moderno** y **servidores de última generación**.
 
-**TurboMC** is a high-performance fork of [Paper](https://github.com/PaperMC/Paper), designed for extreme scalability and optimized specifically for high-density entity scenarios and proxy-based setups.
+[Changelog](./versions.md) · [Features](./TURBOMC_FEATURES_COMPLETE.md) · [Benchmarks](./CACHE_BENCHMARKS.md)
 
-## Key Features
+---
 
-### ⚡ SIMD Collision Optimization
-Utilizes Java's **Incubator Vector API** to parallelize AABB collision checks.
-- **Batched Physics**: Processes entity collisions in parallel groups using hardware acceleration (AVX/AVX2/AVX-512).
-- **Massive Scalability**: Tested with **20,000+ entities** in a single block space without server crash.
+## 🔥 ¿Qué es TurboMC?
 
-### 🚄 Native LZ4 Compression
-Replaces standard Zlib compression with **LZ4** for proxy connections.
-- **Ultra-Low Latency**: Drastically reduces CPU time spent on packet compression/decompression.
-- **Velocity Support**: Custom integration with Velocity proxy for seamless high-speed data transfer.
+TurboMC redefine el rendimiento en Minecraft. Reemplaza el almacenamiento MCA por **LRF (Linear Region Format)**, incorpora **OVF (Optimized Voxel Format)**, **SIMD**, **I/O Asíncrono de alto nivel**, y una IA de prefeching predictivo que elimina el stuttering incluso a velocidades de vuelo extremas.
 
-## Requirements
-- **Java 21** or higher.
-- **Startup Flag**: You **MUST** add `--add-modules=jdk.incubator.vector` to your startup flags to enable SIMD optimizations.
+---
 
-## Getting Started
+## 🏗️ Optimized Voxel Format (OVF) [NUEVO v2.0]
+- **Velocidad Absurda**: Carga estructuras de 16 millones de bloques en **<20ms**.
+- **Compresión Inteligente**: RLE (Run-Length Encoding) nativo que reduce tamaños de schematics masivos a bytes.
+- **Zero Lag**: Diseñado para integrarse con WorldEdit/FAWE sin congelar el servidor.
 
-1.  Download the latest `TurboMC` build (Paperclip jar).
-2.  Add the required flag to your startup script:
-    ```bash
-    java -Xms4G -Xmx4G --add-modules=jdk.incubator.vector -jar turbomc.jar
-    ```
+---
 
-## Development
-This project is based on the Paper ecosystem.
-- Clone the repo.
-- Run `gradlew applyPatches`.
-- Build with `gradlew build`.
+## 🧱 Almacenamiento LRF v2 (Ultra-Estable)
+- **Motor de I/O Predictivo Proactivo**: Analiza vectores de movimiento en cada acceso para pre-cargar chunks mucho antes de que el jugador los necesite.
+- **Lookahead Dinámico de 48 Chunks**: Escalado automático según la velocidad del jugador.
+- **TNBT Transcoding**: Integración perfecta con entidades y POI de Minecraft vainilla.
+- **Optimizado para NVMe**: Acceso directo mediante MMap sin cuellos de botella de caché de software.
+- **Ahorro de Espacio**: Compresión LZ4 ultra-rápida por defecto.
 
-## License
-TurboMC is licensed under GPLv3, same as Paper.
+---
+ 
+ ## 🧪 Suite de Stress Testing (v2.2.0)
+ - **Mobs Stress**: Generación masiva de entidades con safety-cap (2000) para validar tick engine.
+ - **Redstone Grid**: Generador de patrones complejos (48x48 chunks) para estrés de redstone.
+ - **Physics Sim**: Simulación de gravedad (arena/grava) con hard-cap (5000) para validar SIMD physics.
+ - **Flight Benchmark**: Tests automatizados de carga de chunks a alta velocidad.
+ 
+ ---
+
+## ⚡ Rendimiento de Próxima Generación
+- **SIMD Collision Engine**: Vector API para físicas paralelas.
+- **Extreme Pre-fetching Engine**: Lookahead de hasta 800 bloques en la dirección de viaje.
+- **Scalable I/O Pipeline**: Arquitectura de hilos global con hasta 32 workers de descompresión.
+- **Batch I/O v2**: Procesamiento asíncrono optimizado para Folia/Moonrise.
+
+---
+
+## 🧠 Gestión de Calidad Dinámica
+- Ajuste en tiempo real basado en MSPT.
+- Entity culling inteligente.
+- Optimización de partículas y Redstone.
+- Presets dinámicos (Extreme, Performance, Balanced).
+
+---
+
+## 🛠 Requisitos
+- Java 21+
+- Flag obligatorio para SIMD:
+```bash
+--add-modules=jdk.incubator.vector
+```
+

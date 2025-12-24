@@ -1,0 +1,74 @@
+name: TurboMC
+version: 1.0.0
+main: com.turbomc.TurboMCPlugin
+api-version: 1.21
+description: High-performance Minecraft server optimization plugin with LRF storage system
+author: TurboMC Team
+website: https://turbomc.dev
+
+commands:
+  turbomc:
+    description: Main TurboMC command
+    usage: /<command> [subcommand]
+    aliases: [tmc, turbo]
+    permission: turbomc.admin
+  
+  turboinspect:
+    description: Inspect world regions and chunks
+    usage: /<command> [region] [options]
+    aliases: [tinspect, ti]
+    permission: turbomc.inspect
+  
+  turbocompress:
+    description: Compress and optimize storage
+    usage: /<command> [convert|compress|stats]
+    aliases: [tcompress, tc]
+    permission: turbomc.compress
+  
+  turborepair:
+    description: Repair corrupted chunks and regions
+    usage: /<command> [region] [options]
+    aliases: [trepair, tr]
+    permission: turbomc.repair
+
+permissions:
+  turbomc.*:
+    description: All TurboMC permissions
+    children:
+      turbomc.admin: true
+      turbomc.inspect: true
+      turbomc.compress: true
+      turbomc.repair: true
+      turbomc.webviewer: true
+  
+  turbomc.admin:
+    description: Administrative access to TurboMC
+    default: op
+  
+  turbomc.inspect:
+    description: Access to inspection commands
+    default: op
+  
+  turbomc.compress:
+    description: Access to compression commands
+    default: op
+  
+  turbomc.repair:
+    description: Access to repair commands
+    default: op
+  
+  turbomc.webviewer:
+    description: Access to web viewer interface
+    default: true
+
+depend: []
+softdepend: [ViaVersion, WorldEdit, WorldGuard]
+
+libraries:
+  - org.lz4:lz4-java:1.8.0
+  - com.github.luben:zstd-jni:1.5.5-5
+  - org.tukaani:xz:1.9
+
+metrics: true
+
+folia-supported: true

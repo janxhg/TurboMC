@@ -9,7 +9,8 @@ import org.bukkit.Bukkit;
 
 public final class Versioning {
     public static String getBukkitVersion() {
-        String result = "Unknown-Version";
+        // TurboMC: Use valid version format for plugin compatibility
+        String result = "1.21.10-R0.1";
 
         InputStream stream = Bukkit.class.getClassLoader().getResourceAsStream("META-INF/maven/io.papermc.paper/paper-api/pom.properties");
         Properties properties = new Properties();
