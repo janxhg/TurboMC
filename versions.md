@@ -4,7 +4,7 @@ Fork avanzado de PaperMC con foco en **storage moderno**, **SIMD**, y **baja lat
 
 ---
 
-## 🟦 v2.1.0 — The Command & Stress Update (Stable)
+## 🟦 v2.2.0 — The Command & Stress Update (Stable)
 - **Stress Test Suite**: Nuevos comandos para validar rendimiento bajo carga extrema:
     - `/turbo test mobs`: Spawn masivo de entidades con hard-cap de seguridad (2000).
     - `/turbo test redstone`: Generación de grids de estrés para redstone updates.

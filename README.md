@@ -1,6 +1,6 @@
 # TurboMC 🚀
 
-**Versión 2.1.0 (The Command & Stress Update)**  
+**Versión 2.2.0 (The Command & Stress Update)**  
 Fork avanzado de **PaperMC 1.21.10** optimizado para **velocidad extrema**, **almacenamiento moderno** y **servidores de última generación**.
 
 [Changelog](./versions.md) · [Features](./TURBOMC_FEATURES_COMPLETE.md) · [Benchmarks](./CACHE_BENCHMARKS.md)
@@ -29,7 +29,7 @@ TurboMC redefine el rendimiento en Minecraft. Reemplaza el almacenamiento MCA po
 
 ---
  
- ## 🧪 Suite de Stress Testing (v2.1.0)
+ ## 🧪 Suite de Stress Testing (v2.2.0)
  - **Mobs Stress**: Generación masiva de entidades con safety-cap (2000) para validar tick engine.
  - **Redstone Grid**: Generador de patrones complejos (48x48 chunks) para estrés de redstone.
  - **Physics Sim**: Simulación de gravedad (arena/grava) con hard-cap (5000) para validar SIMD physics.
