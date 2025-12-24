@@ -4,6 +4,17 @@ Fork avanzado de PaperMC con foco en **storage moderno**, **SIMD**, y **baja lat
 
 ---
 
+## 🟦 v2.1.0 — The Command & Stress Update (Stable)
+- **Stress Test Suite**: Nuevos comandos para validar rendimiento bajo carga extrema:
+    - `/turbo test mobs`: Spawn masivo de entidades con hard-cap de seguridad (2000).
+    - `/turbo test redstone`: Generación de grids de estrés para redstone updates.
+    - `/turbo test physics`: Simulación de caída de bloques (física de gravedad) con hard-cap (5000).
+- **Command System Overhaul**: Refactor completo del registro de comandos (`TurboCommandRegistry`) para mayor modularidad.
+- **Cache Optimization**: Incremento del tamaño de caché predeterminado a **1024 chunks** para mejorar el hit-rate en vuelo circular.
+- **Parallel Generation (Prototype)**: Primeras implementaciones de generación de mundo multi-hilo para exploración rápida.
+
+---
+
 ## 🚀 v2.0.0 — The Speed Update (Current)
 - **Extreme Predictive Loading**: Engine de pre-carga proactivo basado en vectores de movimiento. Soporta `flyspeed 10` con lookahead dinámico de hasta **48 chunks**.
 - **LRF v2 Stabilization**: Estandarización del formato con header de 5-bytes y alineación de sectores de 256-bytes para eliminar corrupción.
@@ -20,7 +31,7 @@ Fork avanzado de PaperMC con foco en **storage moderno**, **SIMD**, y **baja lat
 - **Race Condition Fixes**: Flush explícito en cargas altas.
 - **Optimización de Memoria**: Corrección de fugas en Performance Tests.
 - **Configuración Robusta**: Carga segura de `turbo.toml` vs `paper-global.yml`.
-- Nombre de compilación oficial: `turbo-server`
+- **Nombre de compilación oficial**: `turbo-server`
 
 ---
 

@@ -19,8 +19,8 @@
 ---
 
 ## 📅 Version Status
-**Current Stable:** v2.0.0 (The Speed Update)
-**Next Milestone:** v2.1.0 (Advanced Profiling & Hybrid Cache)
+**Current Stable:** v2.1.0 (The Command & Stress Update)
+**Next Milestone:** v2.2.0 (Parallel Generation & Profiling)
 
 ---
 
@@ -444,9 +444,9 @@ turbotools benchmark --compression file.dat
 /stress players 100 --ai
 ```
 
-- [ ] Simulación de mobs
-- [ ] Simulación de redstone
-- [ ] Simulación de explosiones
+- [x] Simulación de mobs (Implemented v2.1.0)
+- [x] Simulación de redstone (Implemented v2.1.0)
+- [x] Simulación de explosiones (Implemented v2.1.0 via Physics)
 - [ ] Bot players con AI básica
 
 ---

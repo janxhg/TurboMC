@@ -76,8 +76,8 @@ max-concurrent-loads = 64
 # Enable memory-mapped I/O for faster access
 enabled = true
 
-# Maximum cache size in MB
-max-cache-size = 512
+# Maximum cache size in MB (Increased in v2.1.0)
+max-cache-size = 1024
 
 # Prefetch distance in chunks
 prefetch-distance = 4
@@ -213,7 +213,7 @@ max-concurrent-loads = 128
 
 [storage.mmap]
 enabled = true
-max-cache-size = 1024
+max-cache-size = 2048
 prefetch-distance = 8
 max-memory-usage = 512
 
@@ -341,5 +341,5 @@ Use `/turbo monitor` command to see:
 
 ---
 
-**Last Updated**: 2025-12-23
-**Version**: 2.0.0 (The Speed Update)
+**Last Updated**: 2025-12-24
+**Version**: 2.1.0 (The Command & Stress Update)

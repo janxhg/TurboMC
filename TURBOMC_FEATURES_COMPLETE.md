@@ -1,7 +1,7 @@
 """
 ===============================================================================
 TURBOMC - CARACTERÍSTICAS COMPLETAS IMPLEMENTADAS
-Versión 2.0.0 | Java 21+ | PaperMC Fork Optimizado
+Versión 2.1.0 | Java 21+ | PaperMC Fork Optimizado
 ===============================================================================
 
 # SISTEMA DE ALMACENAMIENTO LRF (LINEAR REGION FORMAT)
@@ -114,6 +114,11 @@ Versión 2.0.0 | Java 21+ | PaperMC Fork Optimizado
   - /lrfrepair repair
   - /lrfrepair status
   - /lrfrepair compress
+- TurboTestCommand: Suite de Stress Testing (NUEVO v2.1.0)
+  - /turbo test mobs <count> (Entity Stress)
+  - /turbo test redstone <intensity> (Update Stress)
+  - /turbo test physics <count> (Physics Stress)
+  - /turbo test flight (Chunk IO Stress)
 
 # SISTEMA DE SEGURIDAD Y REDES
 
