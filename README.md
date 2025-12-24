@@ -57,6 +57,6 @@ TurboMC redefine el rendimiento en Minecraft. Reemplaza el almacenamiento MCA po
 - Java 21+
 - Flag obligatorio para SIMD:
 ```bash
---add-modules=jdk.incubator.vector
+ --enable-preview  and  --add-modules=jdk.incubator.vector
 ```
 
