@@ -397,17 +397,6 @@ fill {
     }
 }
 
-// Rename the output jars
-tasks.jar {
-    archiveBaseName.set("turbomc-server")
-}
-tasks.createMojmapPaperclipJar {
-    outputZip.set(layout.buildDirectory.file("libs/turbomc-paperclip-${project.version}.jar"))
-}
-tasks.createMojmapBundlerJar {
-    outputZip.set(layout.buildDirectory.file("libs/turbomc-bundler-${project.version}.jar"))
-}
-
 // Fix for missing task dependency reported by Gradle 9+
 tasks.named("processResources") {
     dependsOn("applyResourcePatches")
@@ -427,4 +416,5 @@ tasks.named<CreatePaperclipJar>("createReobfPaperclipJar") {
 tasks.named<CreateBundlerJar>("createReobfBundlerJar") {
     outputZip.set(layout.buildDirectory.file("libs/turbo-bundler-${project.version}-reobf.jar"))
 }
+
 
