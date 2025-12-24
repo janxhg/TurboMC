@@ -86,104 +86,95 @@ public final class TurboCommandRegistry {
                     return true;
                 }
                 
-                if (args.length == 0 || (!args[0].equals("storage") && !args[0].equals("inspect") && !args[0].equals("ovf"))) {
-                    sender.sendMessage("§6=== TurboMC Commands ===");
-                    sender.sendMessage("§e/turbo storage stats §7- Show storage statistics");
-                    sender.sendMessage("§e/turbo storage convert §7- Convert MCA files to LRF format");
-                    sender.sendMessage("§e/turbo storage info §7- Show storage information");
-                    sender.sendMessage("§e/turbo storage reload §7- Reload storage configuration");
-                    sender.sendMessage("§e/turbo inspect hex <file> §7- Hex viewer for LRF files");
-                    sender.sendMessage("§e/turbo inspect png <file> §7- Export region to PNG");
-                    sender.sendMessage("§e/turbo inspect tree <file> §7- Chunk tree structure");
-                    sender.sendMessage("§e/turbo inspect stats <file> §7- Compression statistics");
-                    sender.sendMessage("§e/turbo ovf convert <in.schem> <out.ovf> §7- Convert Schematic to OVF");
+                if (args.length == 0) {
+                    sendUsage(sender);
                     return true;
                 }
                 
-                // Handle subcommands
-                if (args.length == 1) {
-                    if (args[0].equals("storage")) {
-                        sendStorageUsage(sender);
-                    } else if (args[0].equals("inspect")) {
-                        sendInspectUsage(sender);
-                    } else if (args[0].equals("ovf")) {
-                        sendOVFUsage(sender);
-                    }
-                    return true;
-                }
+                String subCommand = args[0].toLowerCase();
                 
-                // Handle ovf commands
-                if (args[0].equals("ovf")) {
-                    if (args.length < 2) {
-                        sendOVFUsage(sender);
-                        return true;
-                    }
-                    if (args[1].equals("convert")) {
-                        if (args.length < 4) {
-                            sender.sendMessage("§cUsage: /turbo ovf convert <input.schem> <output.ovf>");
-                            return true;
+                switch (subCommand) {
+                    case "stats":
+                         TurboStatsCommand.execute(sender);
+                         return true;
+                         
+                    case "test":
+                         if (args.length < 2) {
+                             sender.sendMessage("§cUsage: /turbo test <chunks|gen|flight|cache> [args...]");
+                             return true;
+                         }
+                         String testType = args[1].toLowerCase();
+                         if (testType.equals("chunks")) {
+                             int count = args.length > 2 ? parseInt(args[2], 1000) : 1000;
+                             TurboTestCommand.testChunks(sender, count);
+                         } else if (testType.equals("gen")) {
+                             int radius = args.length > 2 ? parseInt(args[2], 5) : 5;
+                             TurboTestCommand.testGeneration(sender, radius);
+                         } else if (testType.equals("flight")) {
+                             int speed = args.length > 2 ? parseInt(args[2], 5) : 5;
+                             int dist = args.length > 3 ? parseInt(args[3], 1000) : 1000;
+                             TurboTestCommand.testFlight(sender, speed, dist);
+                         } else if (testType.equals("cache")) {
+                             TurboTestCommand.testCache(sender);
+                         } else if (testType.equals("mobs")) {
+                             int count = args.length > 2 ? parseInt(args[2], 100) : 100;
+                             String type = args.length > 3 ? args[3] : "ZOMBIE";
+                             TurboTestCommand.testMobs(sender, count, type);
+                         } else if (testType.equals("redstone")) {
+                             int intensity = args.length > 2 ? parseInt(args[2], 1) : 1;
+                             TurboTestCommand.testRedstone(sender, intensity);
+                         } else if (testType.equals("physics")) {
+                             int count = args.length > 2 ? parseInt(args[2], 100) : 100;
+                             TurboTestCommand.testPhysics(sender, count);
+                         } else {
+                             sender.sendMessage("§cUnknown test type: " + testType);
+                         }
+                         return true;
+                         
+                    case "generation":
+                    case "gen":
+                         if (args.length < 2) {
+                             TurboGenerationCommand.showStats(sender);
+                             return true;
+                         }
+                         String genSub = args[1].toLowerCase();
+                         if (genSub.equals("stats")) {
+                             TurboGenerationCommand.showStats(sender);
+                         } else if (genSub.equals("toggle")) {
+                             boolean enable = args.length > 2 ? Boolean.parseBoolean(args[2]) : true;
+                             TurboGenerationCommand.toggle(sender, enable);
+                         } else if (genSub.equals("queue")) {
+                             TurboGenerationCommand.showQueue(sender);
+                         } else {
+                             TurboGenerationCommand.showStats(sender);
+                         }
+                         return true;
+                         
+                    case "storage":
+                        if (args.length > 1) {
+                             handleStorageCommand(sender, args);
+                        } else {
+                             sendStorageUsage(sender);
                         }
-                        handleOVFConvert(sender, args[2], args[3]);
                         return true;
-                    }
-                    sendOVFUsage(sender);
-                    return true;
-                }
-
-                // Handle storage commands
-                if (args[0].equals("storage")) {
-                    String subCommand = args[1].toLowerCase();
-                    switch (subCommand) {
-                        case "stats":
-                            handleStorageStats(sender);
-                            return true;
-                        case "convert":
-                            sender.sendMessage("§6=== TurboMC Storage Conversion ===");
-                            sender.sendMessage("§eUse §e/lrfrepair convert §7for LRF conversion operations");
-                            return true;
-                        case "info":
-                            handleStorageInfo(sender);
-                            return true;
-                        case "reload":
-                            handleStorageReload(sender);
-                            return true;
-                        default:
-                            sendStorageUsage(sender);
-                            return true;
-                    }
-                }
-                
-                // Handle inspect commands
-                if (args[0].equals("inspect")) {
-                    if (args.length < 3) {
-                        sendInspectUsage(sender);
+                    case "inspect":
+                        if (args.length > 1) {
+                             handleInspectCommand(sender, args);
+                        } else {
+                             sendInspectUsage(sender);
+                        }
                         return true;
-                    }
-                    
-                    String inspectType = args[1].toLowerCase();
-                    String fileName = args[2];
-                    
-                    switch (inspectType) {
-                        case "hex":
-                            handleInspectHex(sender, fileName);
-                            return true;
-                        case "png":
-                            handleInspectPng(sender, fileName);
-                            return true;
-                        case "tree":
-                            handleInspectTree(sender, fileName);
-                            return true;
-                        case "stats":
-                            handleInspectStats(sender, fileName);
-                            return true;
-                        case "default":
-                            sendInspectUsage(sender);
-                            return true;
-                    }
+                    case "ovf":
+                        if (args.length > 1) {
+                             handleOVFCommand(sender, args);
+                        } else {
+                             sendOVFUsage(sender);
+                        }
+                        return true;
+                    default:
+                        sendUsage(sender);
+                        return true;
                 }
-                
-                // Default case - should not reach here
-                return false;
             }
             
             @Override
@@ -193,20 +184,35 @@ public final class TurboCommandRegistry {
                 }
                 
                 if (args.length == 1) {
-                    return Arrays.asList("storage", "inspect", "ovf");
+                    return Arrays.asList("stats", "test", "gen", "storage", "inspect", "ovf");
+                }
+                
+                String subCommand = args[0].toLowerCase();
+                
+                if (subCommand.equals("test")) {
+                    if (args.length == 2) {
+                        return Arrays.asList("chunks", "gen", "flight", "cache", "mobs", "redstone", "physics");
+                    }
+                } else if (subCommand.startsWith("gen")) {
+                    if (args.length == 2) {
+                        return Arrays.asList("stats", "toggle", "queue");
+                    }
+                    if (args.length == 3 && args[1].equalsIgnoreCase("toggle")) {
+                        return Arrays.asList("true", "false");
+                    }
                 }
                 
                 if (args.length == 2) {
-                    if (args[0].equals("storage")) {
+                    if (subCommand.equals("storage")) {
                         return Arrays.asList("stats", "convert", "info", "reload");
-                    } else if (args[0].equals("inspect")) {
+                    } else if (subCommand.equals("inspect")) {
                         return Arrays.asList("hex", "png", "tree", "stats");
-                    } else if (args[0].equals("ovf")) {
+                    } else if (subCommand.equals("ovf")) {
                         return Arrays.asList("convert");
                     }
                 }
                 
-                if (args.length == 3 && args[0].equals("inspect")) {
+                if (args.length == 3 && subCommand.equals("inspect")) {
                     // Suggest common LRF files
                     return Arrays.asList("r.0.0.lrf", "r.0.-1.lrf", "r.1.0.lrf", "r.-1.0.lrf");
                 }
@@ -214,7 +220,9 @@ public final class TurboCommandRegistry {
                 return Arrays.asList();
             }
         };
-        
+
+
+
         // Register the turbo command
         net.minecraft.server.MinecraftServer.getServer().server.getCommandMap().register("turbo", "TurboMC", turboCommand);
         
@@ -235,7 +243,56 @@ public final class TurboCommandRegistry {
         // Register the lrfrepair command
         net.minecraft.server.MinecraftServer.getServer().server.getCommandMap().register("lrfrepair", "TurboMC", lrfRepairCommand);
         
-        System.out.println("[TurboMC][Commands] Registered 2 Bukkit commands: turbo, lrfrepair");
+        System.out.println("[TurboMC][Commands] Registered commands: turbo (subcommands: stats, test, gen, storage, inspect, ovf), lrfrepair");
+    }
+
+    private static void sendUsage(CommandSender sender) {
+        sender.sendMessage("§6=== TurboMC Commands ===");
+        sender.sendMessage("§e/turbo stats §7- Show server performance & dashboard");
+        sender.sendMessage("§e/turbo test ... §7- Run mass tests & simulations");
+        sender.sendMessage("§e/turbo gen ... §7- Manage parallel chunk generation");
+        sender.sendMessage("§e/turbo storage ... §7- Storage management commands");
+        sender.sendMessage("§e/turbo inspect ... §7- Inspector tools");
+        sender.sendMessage("§e/turbo ovf ... §7- OVF conversion tools");
+    }
+
+    private static void handleStorageCommand(CommandSender sender, String[] args) {
+        String sub = args[1].toLowerCase();
+        switch (sub) {
+            case "stats": handleStorageStats(sender); break;
+            case "convert": sender.sendMessage("§eUse /lrfrepair convert"); break;
+            case "info": handleStorageInfo(sender); break;
+            case "reload": handleStorageReload(sender); break;
+            default: sendStorageUsage(sender); break;
+        }
+    }
+
+    private static void handleInspectCommand(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+             sendInspectUsage(sender);
+             return;
+        }
+        String type = args[1].toLowerCase();
+        String file = args[2];
+        switch (type) {
+             case "hex": handleInspectHex(sender, file); break;
+             case "png": handleInspectPng(sender, file); break;
+             case "tree": handleInspectTree(sender, file); break;
+             case "stats": handleInspectStats(sender, file); break;
+             default: sendInspectUsage(sender); break;
+        }
+    }
+
+    private static void handleOVFCommand(CommandSender sender, String[] args) {
+        if (args.length < 4 || !args[1].equalsIgnoreCase("convert")) {
+             if (args.length >= 2 && args[1].equalsIgnoreCase("convert")) {
+                 sender.sendMessage("§cUsage: /turbo ovf convert <in.schem> <out.ovf>");
+                 return;
+             }
+             sendOVFUsage(sender);
+             return;
+        }
+        handleOVFConvert(sender, args[2], args[3]);
     }
     
     private static void sendOVFUsage(CommandSender sender) {
@@ -600,5 +657,9 @@ public final class TurboCommandRegistry {
         } catch (Exception e) {
             sender.sendMessage("§cError generating statistics: " + e.getMessage());
         }
+    }
+    // Helper method for parsing integers safely
+    private static int parseInt(String val, int def) {
+        try { return Integer.parseInt(val); } catch (NumberFormatException e) { return def; }
     }
 }

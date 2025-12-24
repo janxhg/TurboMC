@@ -28,8 +28,8 @@ public class TurboConfig {
     private final File serverDirectory;
     
     private TurboConfig(File serverDirectory) {
-        this.configFile = new File(serverDirectory, "turbo.toml");
-        this.serverDirectory = serverDirectory;
+        this.serverDirectory = serverDirectory != null ? serverDirectory : new File(".");
+        this.configFile = new File(this.serverDirectory, "turbo.toml");
         
         // Try to load from turbo.toml first, fallback to paper-global.yml
         if (configFile.exists()) {
@@ -69,7 +69,11 @@ public class TurboConfig {
     
     public static TurboConfig getInstance() {
         if (instance == null) {
-            throw new IllegalStateException("TurboConfig not initialized! Call getInstance(File) first.");
+            synchronized (INSTANCE_LOCK) {
+                if (instance == null) {
+                    instance = new TurboConfig(new File("."));
+                }
+            }
         }
         return instance;
     }
@@ -95,289 +99,290 @@ public class TurboConfig {
         try {
             // Write default configuration
             String defaultConfig = """
-                # TurboMC Configuration File
-                # This file controls server-specific optimizations and features unique to TurboMC
-                
-                [compression]
-                # Compression algorithm: "zstd" (fastest/best), "lz4" (fast), or "zlib" (vanilla compatible)
-                algorithm = "zstd"
-                
-                # Compression level
-                # - For Zstd: 1-22 (3 is standard, 1 is ultra-fast)
-                # - For LZ4: 1-17
-                level = 3
-                
-                # Automatically migrate old zlib-compressed data to LZ4 format
-                auto-migrate = true
-                
-                # Enable fallback to zlib if LZ4 decompression fails
-                fallback-enabled = true
-                
-                # Re-compress existing data when loaded if settings change (e.g. higher level)
-                # Warning: Increases disk I/O as chunks are rewritten with new settings.
-                recompress-on-load = false
-                
-                [storage]
-                # Region file format: "auto" (detect), "lrf" (optimized), or "mca" (vanilla)
-                format = "lrf"
-                
-                # Automatically convert MCA to LRF when loading chunks
-                auto-convert = true
-                
-                # Conversion mode: "on-demand" (convert as chunks load), "background" (idle time), "full-lrf" (convert all at startup), or "manual"
-                conversion-mode = "on-demand"
-                
-                # Backup original MCA files before deletion
-                backup-original-mca = false
-                
-                # Batch operations configuration
-                [storage.batch]
-                # Enable batch chunk loading/saving
-                enabled = true
-                
-                # Number of threads for batch loading operations
-                load-threads = 8
-                
-                # Number of threads for batch saving operations  
-                save-threads = 4
-                
-                # Maximum chunks per batch operation
-                batch-size = 64
-                
-                # Maximum concurrent loading operations
-                max-concurrent-loads = 64
-                
-                # Memory-mapped read-ahead engine
-                [storage.mmap]
-                # Enable memory-mapped read-ahead for SSD/NVMe optimization
-                enabled = true
-                
-                # Maximum cache size in number of chunks
-                max-cache-size = 512
-                
-                # Prefetch distance in chunks from player position
-                prefetch-distance = 4
-                
-                # Prefetch batch size
-                # Prefetch batch size (Increased for NVMe)
-                prefetch-batch-size = 32
-                
-                # Predictive/Kinematic Prefetching
-                # Analyzes movement vectors to pre-load chunks in the direction of travel
-                predictive-enabled = true
-                
-                # Prediction strength (how many chunks ahead to look)
-                # Increased to 12 for high speed flight support
-                prediction-scale = 12
-                
-                # Maximum memory usage for caching (in MB)
-                max-memory-usage = 128
-                
-                # Use Java 22+ Foreign Memory API if available
-                use-foreign-memory-api = true
-                
-                # Integrity validation system
-                [storage.integrity]
-                # Enable chunk integrity validation with checksums
-                enabled = true
-                
-                # Primary checksum algorithm: "crc32", "crc32c", "sha256"
-                primary-algorithm = "crc32c"
-                
-                # Backup checksum algorithm for verification (null to disable)
-                backup-algorithm = "sha256"
-                
-                # Enable automatic repair from backups
-                auto-repair = true
-                
-                # Number of validation threads
-                validation-threads = 2
-                
-                # Validation interval in milliseconds (5 minutes)
-                validation-interval = 300000
-                
-                [ovf]
-                # Optimized Voxel Format (OVF) Configuration
-                # New high-performance structure format for <100ms load times
-                enabled = true
-                
-                # Compression (RLE) is always enabled in OVF, this controls additional ZSTD wrapping if implemented future
-                compression-level = 3
-                
-                [quality]
-                # Quality and rendering optimizations
-                # Target TPS for quality adjustments
-                tps-threshold = 18
-                
-                # Memory usage threshold for quality adjustments (0.8 = 80%)
-                memory-threshold = 0.8
-                
-                # Adjustment interval in server ticks (1200 = 1 minute)
-                adjustment-interval-ticks = 1200
-                
-                # Enable automatic quality adjustments based on performance
-                auto_adjust_enabled = true
-                
-                # Default quality preset: LOW, MEDIUM, HIGH, ULTRA, DYNAMIC
-                default-preset = "HIGH"
-                
-                # Entity culling optimization
-                entity_culling_enabled = true
-                
-                # Particle effect optimization
-                particle_optimization_enabled = true
-                
-                [fps]
-                # FPS optimization settings
-                # Target TPS for optimization
-                target-tps = 20
-                
-                # TPS tolerance for optimization adjustments (±0.5 TPS)
-                tps-tolerance = 0.5
-                
-                # Optimization check interval in ticks (100 = 5 seconds)
-                optimization-interval-ticks = 100
-                
-                # Redstone optimization
-                redstone_optimization_enabled = true
-                
-                # Entity activation range optimization
-                entity_optimization_enabled = true
-                
-                # Hopper optimization
-                hopper_optimization_enabled = true
-                
-                # Mob AI and Sensor throttling
-                mob_throttling_enabled = true
-                
-                # Global Tick Budgeting (in milliseconds)
-                global_budget_enabled = true
-                tick_budget_ms = 45.0
-                
-                # Mob spawning optimization
-                mob_spawning_optimization_enabled = true
-                
-                # Chunk ticking optimization
-                chunk_ticking_optimization_enabled = true
-                
-                # Default optimization mode: CONSERVATIVE, BALANCED, PERFORMANCE, EXTREME, ADAPTIVE
-                default-mode = "BALANCED"
-                
-                [chunk]
-                # Chunk loading optimization settings
-                # Enable intelligent chunk preloading
-                preloading_enabled = true
-                
-                # Enable parallel chunk generation
-                parallel_generation_enabled = true
-                
-                # Number of threads for parallel generation (0 = auto)
-                generation-threads = 0
-                
-                # Enable chunk caching
-                caching_enabled = true
-                
-                # Enable priority-based loading
-                priority_loading_enabled = true
-                
-                # Maximum memory usage for chunk caching (in MB)
-                max-memory-usage-mb = 128
-                
-                # Memory threshold for cache cleanup (0.8 = 80%)
-                memory-threshold = 0.8
-                
-                # Default loading strategy: CONSERVATIVE, BALANCED, AGGRESSIVE, EXTREME, ADAPTIVE
-                default-strategy = "AGGRESSIVE"
-                
-                [world.generation]
-                # Parallel chunk generation for high-speed flight (v2.2.0)
-                # Generates multiple chunks simultaneously to eliminate lag in unexplored areas
-                
-                # Enable parallel generation
-                parallel-enabled = true
-                
-                # Number of worker threads (0 = auto-detect: CPU cores / 2)
-                # Recommended: 8-16 for high-end CPUs
-                generation-threads = 0
-                
-                # Maximum chunks generating in parallel
-                # Higher = faster in unexplored areas, more CPU/RAM usage
-                max-concurrent-generations = 16
-                
-                # Priority mode: "distance" (closest first) or "direction" (flight path first)
-                priority-mode = "direction"
-                
-                # Pre-generation lookahead distance in chunks
-                # Chunks beyond this won't be pre-generated
-                pregeneration-distance = 24
-                
-                # Smart pre-detection: check if chunk exists before player arrives
-                smart-predetection = true
-                
-                [version-control]
-                # Minimum Minecraft version allowed to connect (e.g., "1.20.1")
-                minimum-version = "1.20.1"
-                
-                # Maximum Minecraft version allowed (usually server version)
-                maximum-version = "1.21.10"
-                
-                # List of specific versions to block (e.g., ["1.20.3", "1.20.4"])
-                blocked-versions = []
-                
-                [web-viewer]
-                # TurboMC Web Viewer Configuration
-                # Interactive map viewer for world inspection and chunk analysis
-                
-                # Enable/disable web viewer
-                enabled = true
-                
-                # Web server port (default: 8080)
-                port = 8080
-                
-                # Host interface (0.0.0.0 for all interfaces, localhost for local only)
-                host = "0.0.0.0"
-                
-                # Maximum concurrent connections
-                max-connections = 50
-                
-                # Cache size in MB
-                cache-size-mb = 64
-                
-                # Auto-refresh interval in seconds (0 = disabled)
-                auto-refresh-interval-seconds = 30
-                
-                [web-viewer.map-display]
-                # Map display settings
-                
-                # Default zoom level (0.1 = far, 5.0 = close)
-                default-zoom = 1.0
-                
-                # Maximum zoom level
-                max-zoom = 5.0
-                
-                # Minimum zoom level
-                min-zoom = 0.1
-                
-                # Chunk size in pixels at zoom 1.0
-                chunk-pixel-size = 16
-                
-                # Show chunk boundaries
-                show_chunk_boundaries = true
-                
-                # Show region boundaries
-                show_region_boundaries = true
-                
-                # Show coordinate grid
-                show_coordinate_grid = true
-                
-                [web-viewer.chunk-analysis]
-                # Chunk analysis and corruption detection
-                
-                # Enable chunk corruption detection
-                corruption-detection = true
-                
-                # Highlight corrupted chunks
-                highlight-corrupted = true
+# TurboMC Configuration File
+# This file controls server-specific optimizations and features unique to TurboMC
+
+[compression]
+# Compression algorithm: "zstd" (fastest/best), "lz4" (fast), or "zlib" (vanilla compatible)
+algorithm = "zstd"
+
+# Compression level
+# - For Zstd: 1-22 (3 is standard, 1 is ultra-fast)
+# - For LZ4: 1-17
+level = 3
+
+# Automatically migrate old zlib-compressed data to LZ4 format
+auto-migrate = true
+
+# Enable fallback to zlib if LZ4 decompression fails
+fallback-enabled = true
+
+# Re-compress existing data when loaded if settings change (e.g. higher level)
+# Warning: Increases disk I/O as chunks are rewritten with new settings.
+recompress-on-load = false
+
+[storage]
+# Region file format: "auto" (detect), "lrf" (optimized), or "mca" (vanilla)
+format = "lrf"
+
+# Automatically convert MCA to LRF when loading chunks
+auto-convert = true
+
+# Conversion mode: "on-demand" (convert as chunks load), "background" (idle time), "full-lrf" (convert all at startup), or "manual"
+conversion-mode = "on-demand"
+
+# Backup original MCA files before deletion
+backup-original-mca = false
+
+# Batch operations configuration
+[storage.batch]
+# Enable batch chunk loading/saving
+enabled = true
+
+# Number of threads for batch loading operations
+load-threads = 8
+
+# Number of threads for batch saving operations
+save-threads = 4
+
+# Maximum chunks per batch operation
+batch-size = 64
+
+# Maximum concurrent loading operations
+max-concurrent-loads = 64
+
+# Memory-mapped read-ahead engine
+[storage.mmap]
+# Enable memory-mapped read-ahead for SSD/NVMe optimization
+enabled = true
+
+# Maximum cache size in number of chunks
+max-cache-size = 512
+
+# Prefetch distance in chunks from player position
+prefetch-distance = 4
+
+# Prefetch batch size
+# Prefetch batch size (Increased for NVMe)
+prefetch-batch-size = 32
+
+# Predictive/Kinematic Prefetching
+# Analyzes movement vectors to pre-load chunks in the direction of travel
+predictive-enabled = true
+
+# Prediction strength (how many chunks ahead to look)
+# Increased to 12 for high speed flight support
+prediction-scale = 12
+
+# Maximum memory usage for caching (in MB)
+max-memory-usage = 128
+
+# Use Java 22+ Foreign Memory API if available
+use-foreign-memory-api = true
+
+# Integrity validation system
+[storage.integrity]
+# Enable chunk integrity validation with checksums
+enabled = true
+
+# Primary checksum algorithm: "crc32", "crc32c", "sha256"
+primary-algorithm = "crc32c"
+
+# Backup checksum algorithm for verification (null to disable)
+backup-algorithm = "sha256"
+
+# Enable automatic repair from backups
+auto-repair = true
+
+# Number of validation threads
+validation-threads = 2
+
+# Validation interval in milliseconds (5 minutes)
+validation-interval = 300000
+
+[ovf]
+# Optimized Voxel Format (OVF) Configuration
+# New high-performance structure format for <100ms load times
+enabled = true
+
+# Compression (RLE) is always enabled in OVF, this controls additional ZSTD wrapping if implemented future
+compression-level = 3
+
+[quality]
+# Quality and rendering optimizations
+# Target TPS for quality adjustments
+tps-threshold = 18
+
+# Memory usage threshold for quality adjustments (0.8 = 80%)
+memory-threshold = 0.8
+
+# Adjustment interval in server ticks (1200 = 1 minute)
+adjustment-interval-ticks = 1200
+
+# Enable automatic quality adjustments based on performance
+auto_adjust_enabled = true
+
+# Default quality preset: LOW, MEDIUM, HIGH, ULTRA, DYNAMIC
+default-preset = "HIGH"
+
+# Entity culling optimization
+entity_culling_enabled = true
+
+# Particle effect optimization
+particle_optimization_enabled = true
+
+[fps]
+# FPS optimization settings
+# Target TPS for optimization
+target-tps = 20
+
+# TPS tolerance for optimization adjustments (±0.5 TPS)
+tps-tolerance = 0.5
+
+# Optimization check interval in ticks (100 = 5 seconds)
+optimization-interval-ticks = 100
+
+# Redstone optimization
+redstone_optimization_enabled = true
+
+# Entity activation range optimization
+entity_optimization_enabled = true
+
+# Hopper optimization
+hopper_optimization_enabled = true
+
+# Mob AI and Sensor throttling
+mob_throttling_enabled = true
+
+# Global Tick Budgeting (in milliseconds)
+global_budget_enabled = true
+tick_budget_ms = 45.0
+
+# Mob spawning optimization
+mob_spawning_optimization_enabled = true
+
+# Chunk ticking optimization
+chunk_ticking_optimization_enabled = true
+
+# Default optimization mode: CONSERVATIVE, BALANCED, PERFORMANCE, EXTREME, ADAPTIVE
+default-mode = "BALANCED"
+
+[chunk]
+# Chunk loading optimization settings
+# Enable intelligent chunk preloading
+preloading_enabled = true
+
+# Enable parallel chunk generation
+parallel_generation_enabled = true
+
+# Number of threads for parallel generation (0 = auto)
+generation-threads = 0
+
+# Enable chunk caching
+caching_enabled = true
+
+# Enable priority-based loading
+priority_loading_enabled = true
+
+# Maximum memory usage for chunk caching (in MB)
+max-memory-usage-mb = 128
+
+# Memory threshold for cache cleanup (0.8 = 80%)
+memory-threshold = 0.8
+
+# Default loading strategy: CONSERVATIVE, BALANCED, AGGRESSIVE, EXTREME, ADAPTIVE
+default-strategy = "AGGRESSIVE"
+
+[world.generation]
+# Parallel chunk generation for high-speed flight (v2.2.0)
+# Generates multiple chunks simultaneously to eliminate lag in unexplored areas
+
+# Enable parallel generation
+parallel-enabled = true
+
+# Number of worker threads (0 = auto-detect: CPU cores / 2)
+# Recommended: 8-16 for high-end CPUs
+generation-threads = 16
+
+# Maximum chunks generating in parallel
+# Higher = faster in unexplored areas, more CPU/RAM usage
+max-concurrent-generations = 32
+
+# Priority mode: "distance" (closest first) or "direction" (flight path first)
+priority-mode = "direction"
+
+# Pre-generation lookahead distance in chunks
+# Chunks beyond this won't be pre-generated
+pregeneration-distance = 48
+
+# Smart pre-detection: check if chunk exists before player arrives
+smart-predetection = true
+
+[version-control]
+# Minimum Minecraft version allowed to connect (e.g., "1.20.1")
+minimum-version = "1.20.1"
+
+# Maximum Minecraft version allowed (usually server version)
+maximum-version = "1.21.10"
+
+# List of specific versions to block (e.g., ["1.20.3", "1.20.4"])
+blocked-versions = []
+
+[web-viewer]
+# TurboMC Web Viewer Configuration
+# Interactive map viewer for world inspection and chunk analysis
+
+# Enable/disable web viewer
+enabled = true
+
+# Web server port (default: 8080)
+port = 8080
+
+# Host interface (0.0.0.0 for all interfaces, localhost for local only)
+host = "0.0.0.0"
+
+# Maximum concurrent connections
+max-connections = 50
+
+# Cache size in MB
+cache-size-mb = 64
+
+# Auto-refresh interval in seconds (0 = disabled)
+auto-refresh-interval-seconds = 30
+
+[web-viewer.map-display]
+# Map display settings
+
+# Default zoom level (0.1 = far, 5.0 = close)
+default-zoom = 1.0
+
+# Maximum zoom level
+max-zoom = 5.0
+
+# Minimum zoom level
+min-zoom = 0.1
+
+# Chunk size in pixels at zoom 1.0
+chunk-pixel-size = 16
+
+# Show chunk boundaries
+show_chunk_boundaries = true
+
+# Show region boundaries
+show_region_boundaries = true
+
+# Show coordinate grid
+show_coordinate_grid = true
+
+[web-viewer.chunk-analysis]
+# Chunk analysis and corruption detection
+
+# Enable chunk corruption detection
+corruption-detection = true
+
+# Highlight corrupted chunks
+highlight-corrupted = true
+
                 """;
             
             Files.writeString(configFile.toPath(), defaultConfig);
@@ -437,44 +442,44 @@ public class TurboConfig {
                 Map<String, Object> batch = (Map<String, Object>) storage.get("batch");
                 if (batch == null) {
                     // Add default batch section if missing
-                    Map<String, Object> defaultBatch = new HashMap<>();
-                    defaultBatch.put("enabled", true);
-                    defaultBatch.put("load-threads", 4);
-                    defaultBatch.put("save-threads", 2);
-                    defaultBatch.put("batch-size", 32);
-                    defaultBatch.put("max-concurrent-loads", 64);
-                    storageFull.put("batch", defaultBatch);
-                }
-                
+                Map<String, Object> defaultBatch = new HashMap<>();
+                defaultBatch.put("enabled", true);
+                defaultBatch.put("load-threads", 4);
+                defaultBatch.put("save-threads", 2);
+                defaultBatch.put("batch-size", 32);
+                defaultBatch.put("max-concurrent-loads", 64);
+                storageFull.put("batch", defaultBatch);
+            }
+            
                 // Handle nested mmap section
                 Map<String, Object> mmap = (Map<String, Object>) storage.get("mmap");
                 if (mmap == null) {
                     // Add default mmap section if missing
-                    Map<String, Object> defaultMmap = new HashMap<>();
-                    defaultMmap.put("enabled", true);
-                    defaultMmap.put("max-cache-size", 256);
-                    defaultMmap.put("prefetch-distance", 3);
-                    defaultMmap.put("prefetch-batch-size", 8);
-                    defaultMmap.put("max-memory-usage", 128);
-                    defaultMmap.put("use-foreign-memory-api", true);
-                    storageFull.put("mmap", defaultMmap);
-                }
-                
+                Map<String, Object> defaultMmap = new HashMap<>();
+                defaultMmap.put("enabled", true);
+                defaultMmap.put("max-cache-size", 256);
+                defaultMmap.put("prefetch-distance", 3);
+                defaultMmap.put("prefetch-batch-size", 8);
+                defaultMmap.put("max-memory-usage", 128);
+                defaultMmap.put("use-foreign-memory-api", true);
+                storageFull.put("mmap", defaultMmap);
+            }
+            
                 // Handle nested integrity section
                 Map<String, Object> integrity = (Map<String, Object>) storage.get("integrity");
                 if (integrity == null) {
                     // Add default integrity section if missing
-                    Map<String, Object> defaultIntegrity = new HashMap<>();
-                    defaultIntegrity.put("enabled", true);
-                    defaultIntegrity.put("primary-algorithm", "crc32c");
-                    defaultIntegrity.put("backup-algorithm", "sha256");
-                    defaultIntegrity.put("auto-repair", true);
-                    defaultIntegrity.put("validation-threads", 2);
-                    defaultIntegrity.put("validation-interval", 300000);
-                    storageFull.put("integrity", defaultIntegrity);
-                }
-                
-                tomlMap.put("storage", storageFull);
+                Map<String, Object> defaultIntegrity = new HashMap<>();
+                defaultIntegrity.put("enabled", true);
+                defaultIntegrity.put("primary-algorithm", "crc32c");
+                defaultIntegrity.put("backup-algorithm", "sha256");
+                defaultIntegrity.put("auto-repair", true);
+                defaultIntegrity.put("validation-threads", 2);
+                defaultIntegrity.put("validation-interval", 300000);
+                storageFull.put("integrity", defaultIntegrity);
+            }
+            
+            tomlMap.put("storage", storageFull);
             }
             
             // Version control section
@@ -579,7 +584,7 @@ public class TurboConfig {
     }
     
     public int getMaxCacheSize() {
-        return toml.getLong("storage.mmap.max-cache-size", 512L).intValue();
+        return toml.getLong("storage.mmap.max-cache-size", 1024L).intValue();
     }
     
     public int getPrefetchDistance() {

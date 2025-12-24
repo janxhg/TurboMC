@@ -58,6 +58,7 @@ public class TurboStorageManager implements AutoCloseable {
     private ExecutorService globalWriteExecutor;
     private ExecutorService globalCompressionExecutor;
     private ExecutorService globalDecompressionExecutor;
+    private ExecutorService globalPrefetchExecutor; // Dedicated pool for prefetching
     
     private TurboStorageManager(TurboConfig config) {
         this.config = config;
@@ -113,9 +114,17 @@ public class TurboStorageManager implements AutoCloseable {
                 t.setDaemon(true);
                 return t;
             });
+            
+            // Dedicated prefetch pool - lower priority
+            this.globalPrefetchExecutor = java.util.concurrent.Executors.newFixedThreadPool(Math.max(2, loadThreads), r -> {
+                Thread t = new Thread(r, "Turbo-Global-PrefetchPool");
+                t.setDaemon(true);
+                t.setPriority(Thread.MIN_PRIORITY); // Background priority
+                return t;
+            });
                 
             System.out.println("[TurboMC][Storage] Global thread pools initialized (" + 
-                loadThreads + "L, " + writeThreads + "W, " + compressionThreads + "C, " + decompressionThreads + "D)");
+                loadThreads + "L, " + writeThreads + "W, " + compressionThreads + "C, " + decompressionThreads + "D, " + Math.max(2, loadThreads) + "P)");
         }
         
         // Load feature flags from configuration
@@ -526,7 +535,7 @@ public class TurboStorageManager implements AutoCloseable {
                 
                 return new MMapReadAheadEngine(resource, maxCacheSize, prefetchDistance, 
                                              prefetchBatchSize, maxMemoryUsage, predictive, predictionScale,
-                                             globalDecompressionExecutor);
+                                             globalPrefetchExecutor);
             } catch (IOException e) {
                 System.err.println("[TurboMC][Storage] Failed to create MMap engine for " + path + ": " + e.getMessage());
                 return null;
@@ -761,6 +770,7 @@ public class TurboStorageManager implements AutoCloseable {
             shutdownExecutor(globalWriteExecutor, "WritePool");
             shutdownExecutor(globalCompressionExecutor, "CompressionPool");
             shutdownExecutor(globalDecompressionExecutor, "DecompressionPool");
+            shutdownExecutor(globalPrefetchExecutor, "PrefetchPool");
             
             System.out.println("[TurboMC][Storage] Final stats: " + getStats());
             System.out.println("[TurboMC][Storage] Storage manager shutdown complete.");
@@ -799,6 +809,45 @@ public class TurboStorageManager implements AutoCloseable {
         }
     }
     
+    /**
+     * Get count of active regions.
+     */
+    public int getActiveRegionCount() {
+        return sharedResources.size();
+    }
+    
+    /**
+     * Get batch loader count.
+     */
+    public int getBatchLoaderCount() {
+        return batchLoaders.size();
+    }
+    
+    /**
+     * Get batch saver count.
+     */
+    public int getBatchSaverCount() {
+        return batchSavers.size();
+    }
+    
+    /**
+     * Get total cache hits across all engines.
+     */
+    public long getCacheHits() {
+        return readAheadEngines.values().stream()
+            .mapToLong(engine -> engine.getCacheHits())
+            .sum();
+    }
+    
+    /**
+     * Get total cache misses across all engines.
+     */
+    public long getCacheMisses() {
+        return readAheadEngines.values().stream()
+            .mapToLong(engine -> engine.getCacheMisses())
+            .sum();
+    }
+
     /**
      * Comprehensive statistics for the storage manager.
      */
@@ -898,10 +947,10 @@ public class TurboStorageManager implements AutoCloseable {
                                "loaded=%d,decompressed=%d,cache=%.1f%%,corruption=%.2f%%," +
                                "mmapMemory=%.1fMB,checksumStorage=%.1fMB," +
                                "features=batch=%s,mmap=%s,integrity=%s}",
-                    batchLoaders, batchSavers, mmapEngines, integrityValidators,
-                    totalLoaded, totalDecompressed, getCacheHitRate(), getCorruptionRate(),
+                               batchLoaders, batchSavers, mmapEngines, integrityValidators,
+                               totalLoaded, totalDecompressed, getCacheHitRate(), getCorruptionRate(),
                     mmapMemoryUsage / 1024.0 / 1024.0, totalChecksumStorage / 1024.0 / 1024.0,
-                    batchEnabled, mmapEnabled, integrityEnabled);
+                               batchEnabled, mmapEnabled, integrityEnabled);
         }
     }
 }

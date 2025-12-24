@@ -649,6 +649,20 @@ public class MMapReadAheadEngine implements AutoCloseable {
     }
     
     /**
+     * Get total cache hits.
+     */
+    public int getCacheHits() {
+        return cacheHits.get();
+    }
+    
+    /**
+     * Get total cache misses.
+     */
+    public int getCacheMisses() {
+        return cacheMisses.get();
+    }
+
+    /**
      * Get performance statistics.
      */
     public ReadAheadStats getStats() {
