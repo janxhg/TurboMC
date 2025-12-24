@@ -6,7 +6,7 @@ TurboMC v2.0.0 introduces the **Speed Update**, achieving **200%+ faster** world
 
 ## Benchmark Methodology
 
-- **Hardware**: Intel i9-13900K, 64GB DDR5 RAM, Samsung 990 Pro NVMe SSD
+- **Hardware**: Intel ryzen 5 3500, 16GB DDR4 RAM, 500gb ssd
 - **Minecraft Version**: 1.21.10
 - **Test Set**: 100,000 chunks world exploration, 1,000 structure loads
 - **Flyspeed**: Tested up to **flyspeed 10** (max vanilla survival is ~1x)
