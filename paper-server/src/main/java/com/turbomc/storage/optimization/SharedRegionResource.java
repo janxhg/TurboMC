@@ -139,11 +139,35 @@ public class SharedRegionResource implements AutoCloseable {
     public void close() throws IOException {
         if (refCount.decrementAndGet() <= 0) {
             if (mappedBuffer != null) {
-                // Should ideally unmap, but Java's MappedByteBuffer unmapping is complex
+                cleanBuffer(mappedBuffer);
                 mappedBuffer = null;
             }
             channel.close();
             file.close();
+        }
+    }
+    
+    private void cleanBuffer(java.nio.ByteBuffer buffer) {
+        if (buffer == null || !buffer.isDirect()) return;
+        try {
+            java.lang.reflect.Field unsafeField = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+            unsafeField.setAccessible(true);
+            sun.misc.Unsafe unsafe = (sun.misc.Unsafe) unsafeField.get(null);
+            java.lang.reflect.Method invokeCleaner = sun.misc.Unsafe.class.getMethod("invokeCleaner", java.nio.ByteBuffer.class);
+            invokeCleaner.invoke(unsafe, buffer);
+        } catch (Exception e) {
+            try {
+                java.lang.reflect.Method cleanerMethod = buffer.getClass().getMethod("cleaner");
+                cleanerMethod.setAccessible(true);
+                Object cleaner = cleanerMethod.invoke(buffer);
+                if (cleaner != null) {
+                    java.lang.reflect.Method cleanMethod = cleaner.getClass().getMethod("clean");
+                    cleanMethod.setAccessible(true);
+                    cleanMethod.invoke(cleaner);
+                }
+            } catch (Exception e2) {
+                // Ignore
+            }
         }
     }
     

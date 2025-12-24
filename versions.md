@@ -4,6 +4,17 @@ Fork avanzado de PaperMC con foco en **storage moderno**, **SIMD**, y **baja lat
 
 ---
 
+## 🚀 v2.3.0 — The True Predictive Update (Stable)
+- **Predictive Streaming Engine**: Implementación de `IntentPredictor` que analiza el historial de movimiento del jugador para generar "túneles de probabilidad".
+- **High-Speed Optimizations**: Soporte completo para Elytra y Trident con multiplicadores de lookahead dinámicos.
+- **Parallel Multi-Region Loading**: Estabilización del sistema de carga paralela distribuida entre múltiples regiones LRF.
+- **Architectural Fixes (Windows Compatibility)**: 
+    - Implementación de `cleanBuffer` para desmapeo explícito de `MappedByteBuffer` (soluciona bloqueos de archivos en Windows).
+    - Seguimiento acumulativo de prefetches (`totalPrefetchCount`) para métricas precisas.
+- **Improved Intent AI**: Detección de patrones de vuelo y sprints para pre-cargar hasta 64 chunks en la dirección de viaje.
+
+---
+
 ## 🟦 v2.2.0 — The Command & Stress Update (Stable)
 - **Stress Test Suite**: Nuevos comandos para validar rendimiento bajo carga extrema:
     - `/turbo test mobs`: Spawn masivo de entidades con hard-cap de seguridad (2000).

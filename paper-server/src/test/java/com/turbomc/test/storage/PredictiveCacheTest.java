@@ -73,93 +73,77 @@ public class PredictiveCacheTest {
         
         // Create engine with optimizations manually enabled to test LOGIC
         // (Even if config failed, we want to test the engine logic itself)
-        MMapReadAheadEngine engine = new MMapReadAheadEngine(
-            testFile, 
-            512, // cache size
-            8,   // prefetch dist
-            32,  // batch size
-            100 * 1024 * 1024, // max mem
-            true, // predictive enabled
-            12    // prediction scale
-        );
-        
-        // 1. Initial read at 0,0
-        engine.readChunk(0, 0);
-        int initialPrefetch = engine.getStats().getPrefetchCount();
-        System.out.println("Initial read(0,0) prefetches: " + initialPrefetch);
-        
-        // Wait for async prefetch
-        Thread.sleep(100);
-        
-        // 2. High Speed Move: Jump from 0,0 to 0,8 (Fly Speed 10 Simulation)
-        // This is a delta of 8 chunks. 
-        // Before fix: >2 was "teleport" -> Velocity=0 -> No predictive prefetch
-        // After fix: <=10 is "movement" -> Velocity=8 -> Predictive prefetch active
-        
-        System.out.println("Simulating High Speed Move (0,0 -> 0,8)...");
-        engine.readChunk(0, 8);
-        
-        // Allow async tasks to run
-        Thread.sleep(200);
-        
-        var stats = engine.getStats();
-        System.out.println("Stats after move: " + stats);
-        
-        // If predictive logic worked, it should have prefetched chunks AHEAD of 0,8
-        // i.e., 0,9 to 0,20 (current + 12)
-        // Accessing 0,10 should be a CACHE HIT
-        
-        // Note: Prefetch is async, so we might need a small wait or loop check
-        // But for unit test, we check if it's in cache or if prefetch count increased significantly
-        
-        int prefetchCountAfter = stats.getPrefetchCount();
-        assertTrue(prefetchCountAfter > initialPrefetch, 
-            "Prefetch count should increase after movement");
+        MMapReadAheadEngine engine = null;
+        com.turbomc.storage.optimization.SharedRegionResource resource = null;
+        try {
+            resource = new com.turbomc.storage.optimization.SharedRegionResource(testFile);
+            engine = new MMapReadAheadEngine(
+                resource, 
+                512, // cache size
+                8,   // prefetch dist
+                32,  // batch size
+                100 * 1024 * 1024, // max mem
+                true, // predictive enabled
+                12    // prediction scale
+            );
             
-        // 3. Verify Cache Hit on Predicted Chunk
-        // Access (0, 10) - should be in cache if prediction worked
-        long start = System.nanoTime();
-        engine.readChunk(0, 10);
-        long elapsed = System.nanoTime() - start;
-        
-        // RAM access is usually < 0.1ms, Disk is > 0.1ms (even with NVMe overhead)
-        // But better to check stats hits
-        int hits = engine.getStats().getCacheHits();
-        assertTrue(hits > 0, "Should have at least 1 cache hit from predicted chunk");
-        
-        System.out.println("Predictive logic verification PASSED.");
-        engine.close();
+            // 1. Initial read at 0,0
+            engine.readChunk(0, 0);
+            int initialPrefetch = engine.getStats().getPrefetchCount();
+            System.out.println("Initial read(0,0) prefetches: " + initialPrefetch);
+            
+            // Wait for async prefetch
+            Thread.sleep(200);
+            
+            // 2. High Speed Move: Jump from 0,0 to 0,8 (Fly Speed 10 Simulation)
+            System.out.println("Simulating High Speed Move (0,0 -> 0,8)...");
+            engine.readChunk(0, 8);
+            
+            // Allow async tasks to run
+            Thread.sleep(300);
+            
+            var stats = engine.getStats();
+            System.out.println("Stats after move: " + stats);
+            
+            int prefetchCountAfter = stats.getPrefetchCount();
+            assertTrue(prefetchCountAfter > initialPrefetch, 
+                "Total prefetch count should increase after movement (Expected > " + initialPrefetch + ", got " + prefetchCountAfter + ")");
+                
+            // 3. Verify Cache Hit on Predicted Chunk
+            engine.readChunk(0, 10);
+            
+            int hits = engine.getStats().getCacheHits();
+            assertTrue(hits > 0, "Should have at least 1 cache hit from predicted chunk");
+            
+        } finally {
+            if (engine != null) engine.close();
+            if (resource != null) resource.close();
+        }
     }
 
     @Test
     public void testTeleportDetection() throws Exception {
         System.out.println("Running testTeleportDetection...");
         
-        MMapReadAheadEngine engine = new MMapReadAheadEngine(testFile);
+        MMapReadAheadEngine engine = null;
+        com.turbomc.storage.optimization.SharedRegionResource resource = null;
+        try {
+            resource = new com.turbomc.storage.optimization.SharedRegionResource(testFile);
+            engine = new MMapReadAheadEngine(resource);
         
         // 1. Read 0,0
         engine.readChunk(0, 0);
         Thread.sleep(50);
-        int initialPrefetches = engine.getStats().getPrefetchCount();
         
-        // 2. Teleport far away (0,0 -> 100,100)
-        // Delta > 10. Should register as teleport.
-        // Velocity should be 0.
-        // NO forward prediction, only radial prefetch.
-        engine.readChunk(100, 100); // Note: file only has 32x32 chunks, so this returns null/empty but logic runs
-        
-        // Since 100,100 doesn't exist in our 32x32 File, readChunk returns null
-        // But we want to test the logic trigger.
-        // Let's use 0,0 -> 20,20 (Still > 10 blocks? No, 20 chunks away)
-        // Our file is small (32x32), so 20,20 exists.
-        
+        // 2. Teleport far away
         engine.readChunk(20, 20);
         Thread.sleep(50);
         
-        // Validate stats? 
-        // This is harder to assert without internal access, but we ensure no crash.
         System.out.println("Teleport logic executed safely.");
-        engine.close();
+        } finally {
+            if (engine != null) engine.close();
+            if (resource != null) resource.close();
+        }
     }
 
     private void createTestLRFFile(Path path) throws Exception {

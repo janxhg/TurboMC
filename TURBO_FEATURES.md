@@ -14,17 +14,17 @@ Reemplazo de alto rendimiento para el formato `.schem` de WorldEdit y FAWE.
 - **Asynchronous Conversion:** Conversor asíncrono integrado para migrar archivos `.schem` masivos sin congelar el hilo principal.
 - **Minimal Metadata:** Reducción de overhead de NBT legacy en favor de un formato binario puro.
 
-## 💽 LRF v2: Predictive Storage Engine
-**Estado:** Implementado & Optimizado
-**Clase:** `MMapReadAheadEngine`
+## 💽 LRF v2: Predictive Streaming Engine [DETALLES v2.3]
+**Estado:** Optimizado & Estabilizado
+**Clases:** `MMapReadAheadEngine`, `IntentPredictor`
 
-El motor de almacenamiento LRF ha sido re-ingenierizado en la v2.0 para soportar vuelos a velocidades extremas.
+El motor de almacenamiento LRF ha evolucionado en la v2.3 a un sistema de **Streaming Predictivo Real**.
 
-- **Extreme Predictive Loading (48x scaled):** El motor ahora pre-detecta el vector de movimiento del jugador y carga chunks hasta **48 posiciones** por delante en modo de viaje rápido (flyspeed 10+).
-- **Proactive Prefetching:** A diferencia de la v1, el motor pre-carga de forma proactiva en cada acceso, garantizando fluidez total antes de entrar al nuevo chunk.
-- **Directional Bias:** Algoritmo de vectorización que prioriza el ancho de banda I/O solo en la dirección de viaje del jugador.
-- **LRF v2 Stabilization:** Formato estandarizado con 256-byte alignment y headers de 5-bytes.
-- **NVMe Optimized (Zero Cache Bias):** El sistema detecta hardware NVMe y desactiva el cache L1 de Java por defecto, eliminando un 95% de overhead de gestión de cache innecesario.
+- **Intent Prediction Engine (v2.3):** A diferencia de modelos simples de velocidad, TurboMC ahora analiza el historial de movimiento (últimos 3 segundos) para deducir la "intención" del jugador.
+- **Probability Tunnels:** Genera un túnel de carga probabilístico en lugar de un vector lineal, cubriendo cambios de dirección detectados en tiempo real.
+- **Elytra & Trident Multipliers:** Multiplica dinámicamente el lookahead al detectar vuelos de alta velocidad, permitiendo una carga fluida de hasta **64 chunks** de distancia.
+- **Windows File Lock Fix:** Implementación de desmapeo explícito de memoria (Unsafe Buffer Cleanup) que permite operar en sistemas Windows sin bloqueos de archivos `.lrf`.
+- **Parallel Chunk Pipeline:** Optimización de hilos que permite la carga paralela masiva distribuida entre múltiples regiones de forma asíncrona.
 
 ## 💾 Advanced Converters & Integration...
 

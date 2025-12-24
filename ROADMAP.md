@@ -19,8 +19,8 @@
 ---
 
 ## 📅 Version Status
-**Current Stable:** v2.2.0 (The Command & Stress Update)
-**Next Milestone:** v2.2.0 (Parallel Generation & Profiling)
+**Current Stable:** v2.3.0 (The True Predictive Update)
+**Next Milestone:** v2.4.0 (Parallel Gen & Advanced SIMD)
 
 ---
 
@@ -181,6 +181,7 @@ byte[] compressed = data.compress();
 - [x] `ChunkBatchSaver` - Escritura por lotes ✅ v1.4.0
 - [x] mmap read-ahead engine para SSD/NVMe ✅ v1.4.0
 - [x] **Predictive Loading v2**: Lookahead dinámico (48 chunks) + Vector Bias ✅ v2.0.0
+- [x] **Predictive Streaming Engine v2.3**: Intent Prediction, Probability Tunnels, Elytra/Trident support ✅ v2.3.0
 - [x] Validación de integridad (checksums) ✅ v1.4.0
 - [x] **Stability Fixes**: Alignment, TNBT Transcoding, Scalable Threading ✅ v2.0.0
 
@@ -591,4 +592,4 @@ mode: turbo  # or 'vanilla'
 ---
 
 **Última actualización:** 2025-12-24
-**Versión del documento:** 2.0.0
+**Versión del documento:** 2.3.0

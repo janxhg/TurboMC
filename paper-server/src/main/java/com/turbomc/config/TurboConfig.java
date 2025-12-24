@@ -180,6 +180,20 @@ max-memory-usage = 128
 # Use Java 22+ Foreign Memory API if available
 use-foreign-memory-api = true
 
+[storage.streaming]
+# Intent-based Predictive Streaming
+# Takes precedence over simple velocity prefetch if enabled
+enabled = true
+
+# Number of seconds of movement history to track for trend analysis
+history-seconds = 3
+
+# Width of the prediction tunnel in chunks (radius)
+tunnel-width = 2
+
+# Multiplier for prediction distance when using Elytra
+elytra-multiplier = 4.0
+
 # Integrity validation system
 [storage.integrity]
 # Enable chunk integrity validation with checksums
@@ -601,6 +615,24 @@ highlight-corrupted = true
     
     public boolean useForeignMemoryApi() {
         return toml.getBoolean("storage.mmap.use-foreign-memory-api", true);
+    }
+    
+    // === Streaming Settings ===
+    
+    public boolean isStreamingEnabled() {
+        return toml.getBoolean("storage.streaming.enabled", true);
+    }
+    
+    public int getPredictionHistorySeconds() {
+        return toml.getLong("storage.streaming.history-seconds", 3L).intValue();
+    }
+    
+    public int getPredictionTunnelWidth() {
+        return toml.getLong("storage.streaming.tunnel-width", 2L).intValue();
+    }
+    
+    public double getPredictionElytraMultiplier() {
+        return toml.getDouble("storage.streaming.elytra-multiplier", 4.0);
     }
     
     // === Integrity Validation Settings ===

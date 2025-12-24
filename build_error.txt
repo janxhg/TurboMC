@@ -1,4 +1,0 @@
-Reusing configuration cache.
-> Task :turbo-api:compileJava UP-TO-DATE
-
-> Task :turbo-server:compileJava

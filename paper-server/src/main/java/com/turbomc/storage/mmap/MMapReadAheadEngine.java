@@ -62,7 +62,8 @@ public class MMapReadAheadEngine implements AutoCloseable {
     private final AtomicLong currentMemoryUsage;
     private final AtomicInteger cacheHits;
     private final AtomicInteger cacheMisses;
-    private final AtomicInteger prefetchCount;
+    private final AtomicInteger prefetchCount; // Active prefetches
+    private final AtomicInteger totalPrefetchCount = new AtomicInteger(0); // v2.2: Cumulative prefetches
     
     // Adaptive Prefetching v2.1
     private final AtomicInteger recentHits = new AtomicInteger(0);
@@ -87,6 +88,10 @@ public class MMapReadAheadEngine implements AutoCloseable {
     
     // Statistics
     private final long startTime;
+    
+    // Intent-based Prediction
+    private final com.turbomc.streaming.IntentPredictor intentPredictor;
+
     
 
     public MMapReadAheadEngine(SharedRegionResource resource) throws IOException {
@@ -157,6 +162,13 @@ public class MMapReadAheadEngine implements AutoCloseable {
         this.prefetchCount = new AtomicInteger(0);
         this.dynamicLookahead = predictionScale;
         this.startTime = System.currentTimeMillis();
+        
+        // Initialize Intent Predictor if enabled
+        if (com.turbomc.config.TurboConfig.getInstance().isStreamingEnabled()) {
+            this.intentPredictor = new com.turbomc.streaming.IntentPredictor();
+        } else {
+            this.intentPredictor = null;
+        }
         
         resource.acquire();
         initializeFileMapping();
@@ -433,24 +445,25 @@ public class MMapReadAheadEngine implements AutoCloseable {
     
     /**
      * Trigger prefetch for chunks around the specified coordinates.
-     * Implements "Momentum-Aware" prefetching.
+     * Implements "Momentum-Aware" prefetching + Intent Prediction.
      */
     private void triggerPrefetch(int centerX, int centerZ) {
         if (isClosed.get()) {
             return;
         }
         
-        // Update vector calculation
+        // Update vector calculation (Legacy mechanism for stats/compatibility, kept for now)
         int lastX = lastAccessX.getAndSet(centerX);
         int lastZ = lastAccessZ.getAndSet(centerZ);
         
+        // Update Intent Predictor
+        if (intentPredictor != null) {
+            intentPredictor.update(centerX, centerZ);
+        }
+        
+        // Calculate velocity (approximate)
         int velX = 0;
         int velZ = 0;
-        
-        // Calculate velocity if this isn't the first access and it's nearby (not teleport)
-        // High Speed Support: Increased threshold from 2 to 10 chunks to allow flyspeed 10
-        // Calculate velocity if this isn't the first access and it's nearby (not teleport)
-        // High Speed Support: Increased threshold from 2 to 10 chunks to allow flyspeed 10
         if (lastX != Integer.MIN_VALUE && Math.abs(centerX - lastX) <= 12 && Math.abs(centerZ - lastZ) <= 12) {
              velX = centerX - lastX;
              velZ = centerZ - lastZ;
@@ -471,36 +484,19 @@ public class MMapReadAheadEngine implements AutoCloseable {
             
             boolean isFastTravel = Math.abs(fVelX) >= 2 || Math.abs(fVelZ) >= 2;
             
-            // 1. Extended Vector Prefetch (PRIORITY FOR HIGH SPEED)
-            if (predictiveEnabled && (fVelX != 0 || fVelZ != 0)) {
-                 // Dynamic scale based on velocity AND performance controller (v2.1)
-                 adjustDynamicLookahead();
-                 int controllerScale = dynamicLookahead;
-                 
-                 if (isFastTravel) {
-                      controllerScale *= 2; // Up to 2x based on velocity
-                      if (Math.abs(fVelX) > 4 || Math.abs(fVelZ) > 4) {
-                           controllerScale *= 2; // Up to 4x for extreme speeds
-                      }
-                 }
-                 
-                 for (int k = 1; k <= controllerScale; k++) {
-                      int lookAheadX = centerX + (fVelX * k);
-                      int lookAheadZ = centerZ + (fVelZ * k);
-                      
-                      // Safety check: Stay within region bounds if possible
-                      int idx = LRFConstants.getChunkIndex(lookAheadX & 31, lookAheadZ & 31);
-                      if (!chunkCache.containsKey(idx)) {
-                           chunksToPrefetch.add(new int[]{lookAheadX, lookAheadZ});
-                           if (chunksToPrefetch.size() >= prefetchBatchSize) break;
-                      }
-                 }
+            // 1. Intent-based Prediction (Probability Tunnel) - v2.2
+            if (intentPredictor != null && predictiveEnabled) {
+                List<int[]> predicted = intentPredictor.predict(centerX, centerZ, dynamicLookahead);
+                for (int[] p : predicted) {
+                    int chunkIndex = LRFConstants.getChunkIndex(p[0] & 31, p[1] & 31);
+                    if (!chunkCache.containsKey(chunkIndex)) {
+                        chunksToPrefetch.add(p);
+                        if (chunksToPrefetch.size() >= prefetchBatchSize) break;
+                    }
+                }
             }
             
-            // Update pending count BEFORE loop
-            prefetchCount.addAndGet(chunksToPrefetch.size());
-            
-            // 2. Standard "Spatial" Prefetch (Radius) - ONLY IF NOT FILLING BUDGET WITH VECTOR
+            // 2. Spatial Read-Ahead (Radial Fallback)
             if (chunksToPrefetch.size() < prefetchBatchSize) {
                 for (int dx = -prefetchDistance; dx <= prefetchDistance; dx++) {
                     for (int dz = -prefetchDistance; dz <= prefetchDistance; dz++) {
@@ -511,24 +507,35 @@ public class MMapReadAheadEngine implements AutoCloseable {
                         
                         // Directional Bias: Skip chunks BEHIND us if moving fast
                         if (isFastTravel) {
-                             // Using dot product to determine "behind"
                              if (dx * fVelX + dz * fVelZ < 0) {
-                                  // This chunk is behind the movement vector
-                                  if (Math.abs(dx) > 1 || Math.abs(dz) > 1) {
-                                       continue; 
-                                  }
+                                  if (Math.abs(dx) > 1 || Math.abs(dz) > 1) continue; 
                              }
                         }
                         
                         int chunkIndex = LRFConstants.getChunkIndex(chunkX & 31, chunkZ & 31);
                         if (!chunkCache.containsKey(chunkIndex)) {
-                            chunksToPrefetch.add(new int[]{chunkX, chunkZ});
-                            if (chunksToPrefetch.size() >= prefetchBatchSize) break;
+                            // Deduplicate against intent
+                            boolean alreadyAdded = false;
+                            for (int[] existing : chunksToPrefetch) {
+                                if (existing[0] == chunkX && existing[1] == chunkZ) {
+                                    alreadyAdded = true;
+                                    break;
+                                }
+                            }
+                            if (!alreadyAdded) {
+                                chunksToPrefetch.add(new int[]{chunkX, chunkZ});
+                                if (chunksToPrefetch.size() >= prefetchBatchSize) break;
+                            }
                         }
                     }
                     if (chunksToPrefetch.size() >= prefetchBatchSize) break;
                 }
             }
+            // Update pending count BEFORE loop (MOVED: Now accounts for BOTH Intent and Spatial chunks)
+            int count = chunksToPrefetch.size();
+            prefetchCount.addAndGet(count);
+            totalPrefetchCount.addAndGet(count);
+
             // Prefetch chunks
             for (int[] coords : chunksToPrefetch) {
                 // Stay within same region for THIS engine
@@ -669,7 +676,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
         long elapsed = System.currentTimeMillis() - startTime;
         int hits = cacheHits.get();
         int misses = cacheMisses.get();
-        int prefetches = prefetchCount.get();
+        int prefetches = totalPrefetchCount.get();
         
         double hitRate = (hits + misses) > 0 ? (double) hits / (hits + misses) * 100 : 0;
         
@@ -711,6 +718,10 @@ public class MMapReadAheadEngine implements AutoCloseable {
                 if (sharedResource != null) {
                     sharedResource.close();
                 } else {
+                    if (mappedBuffer != null) {
+                        cleanBuffer(mappedBuffer);
+                        mappedBuffer = null;
+                    }
                     if (fileChannel != null && fileChannel.isOpen()) {
                         fileChannel.close();
                     }
