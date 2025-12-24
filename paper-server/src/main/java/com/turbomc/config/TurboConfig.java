@@ -289,6 +289,31 @@ public class TurboConfig {
                 # Default loading strategy: CONSERVATIVE, BALANCED, AGGRESSIVE, EXTREME, ADAPTIVE
                 default-strategy = "AGGRESSIVE"
                 
+                [world.generation]
+                # Parallel chunk generation for high-speed flight (v2.2.0)
+                # Generates multiple chunks simultaneously to eliminate lag in unexplored areas
+                
+                # Enable parallel generation
+                parallel-enabled = true
+                
+                # Number of worker threads (0 = auto-detect: CPU cores / 2)
+                # Recommended: 8-16 for high-end CPUs
+                generation-threads = 0
+                
+                # Maximum chunks generating in parallel
+                # Higher = faster in unexplored areas, more CPU/RAM usage
+                max-concurrent-generations = 16
+                
+                # Priority mode: "distance" (closest first) or "direction" (flight path first)
+                priority-mode = "direction"
+                
+                # Pre-generation lookahead distance in chunks
+                # Chunks beyond this won't be pre-generated
+                pregeneration-distance = 24
+                
+                # Smart pre-detection: check if chunk exists before player arrives
+                smart-predetection = true
+                
                 [version-control]
                 # Minimum Minecraft version allowed to connect (e.g., "1.20.1")
                 minimum-version = "1.20.1"

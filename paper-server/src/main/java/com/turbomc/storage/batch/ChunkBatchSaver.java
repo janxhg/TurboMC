@@ -61,6 +61,7 @@ public class ChunkBatchSaver implements AutoCloseable {
     private final int compressionType;
     private final long autoFlushDelayMs;
     private volatile long lastFlushTime;
+    private java.util.function.Consumer<List<LRFChunkEntry>> postFlushAction;
     
     /**
      * Create a new batch saver with default configuration.
@@ -271,6 +272,16 @@ public class ChunkBatchSaver implements AutoCloseable {
                     for (CompletableFuture<Void> f : currentFutures) f.completeExceptionally(throwable);
                 } else {
                     chunksSaved.addAndGet(currentBatch.size());
+                    
+                    // Trigger post-flush action (integrity updates, cache invalidation, etc.)
+                    if (postFlushAction != null) {
+                        try {
+                            postFlushAction.accept(currentBatch);
+                        } catch (Exception e) {
+                            System.err.println("[TurboMC] Error in post-flush action: " + e.getMessage());
+                        }
+                    }
+                    
                     for (CompletableFuture<Void> f : currentFutures) f.complete(null);
                 }
             });
@@ -394,11 +405,22 @@ public class ChunkBatchSaver implements AutoCloseable {
     }
     
     /**
+     * Check if a chunk is currently in the batch or being written.
+     */
+    public boolean hasPendingChunk(int chunkX, int chunkZ) {
+        return inflightChunks.containsKey(ChunkPos.asLong(chunkX, chunkZ));
+    }
+
+    /**
      * Get a pending or in-flight chunk if available.
      * Allows "read-your-writes" consistency.
      */
     public LRFChunkEntry getPendingChunk(int chunkX, int chunkZ) {
         return inflightChunks.get(ChunkPos.asLong(chunkX, chunkZ));
+    }
+
+    public void setPostFlushAction(java.util.function.Consumer<List<LRFChunkEntry>> action) {
+        this.postFlushAction = action;
     }
 
     /**

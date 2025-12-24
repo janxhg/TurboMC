@@ -20,7 +20,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import com.turbomc.storage.optimization.SharedRegionResource;
 import java.util.concurrent.atomic.AtomicBoolean;
 import com.turbomc.storage.optimization.SharedRegionResource;
 import com.turbomc.compression.TurboCompressionService;
@@ -64,7 +63,20 @@ public class MMapReadAheadEngine implements AutoCloseable {
     private final AtomicInteger cacheHits;
     private final AtomicInteger cacheMisses;
     private final AtomicInteger prefetchCount;
+    
+    // Adaptive Prefetching v2.1
+    private final AtomicInteger recentHits = new AtomicInteger(0);
+    private final AtomicInteger recentMisses = new AtomicInteger(0);
+    private final AtomicInteger recentPrefetchHits = new AtomicInteger(0);
+    private volatile int dynamicLookahead;
     private final SharedRegionResource sharedResource;
+    
+    // Header caching
+    private volatile LRFHeader cachedHeader;
+    private volatile long lastFileModified;
+    private volatile long lastFileSize;
+    private volatile long lastHeaderRefresh;
+    private final Object headerLock = new Object();
     
     // File mapping
     private RandomAccessFile file;
@@ -76,11 +88,6 @@ public class MMapReadAheadEngine implements AutoCloseable {
     // Statistics
     private final long startTime;
     
-    // Header cache
-    private volatile LRFHeader cachedHeader;
-    private long lastHeaderRefresh;
-    private long lastFileModified;
-    private final Object headerLock = new Object();
 
     public MMapReadAheadEngine(SharedRegionResource resource) throws IOException {
         this(resource, 
@@ -148,6 +155,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
         this.cacheHits = new AtomicInteger(0);
         this.cacheMisses = new AtomicInteger(0);
         this.prefetchCount = new AtomicInteger(0);
+        this.dynamicLookahead = predictionScale;
         this.startTime = System.currentTimeMillis();
         
         resource.acquire();
@@ -184,6 +192,16 @@ public class MMapReadAheadEngine implements AutoCloseable {
     }
     
     /**
+     * Check if a chunk is present in the memory cache.
+     * v2.1 Optimization: Non-blocking check for storage status.
+     */
+    public boolean isCached(int chunkX, int chunkZ) {
+        int idx = LRFConstants.getChunkIndex(chunkX, chunkZ);
+        CachedChunk cached = chunkCache.get(idx);
+        return cached != null && !cached.isExpired();
+    }
+
+    /**
      * Read a chunk with automatic caching and prefetching.
      * 
      * @param chunkX Chunk X coordinate
@@ -201,6 +219,10 @@ public class MMapReadAheadEngine implements AutoCloseable {
         
         if (cached != null && !cached.isExpired()) {
             cacheHits.incrementAndGet();
+            recentHits.incrementAndGet();
+            if (cached.isPrefetched()) {
+                recentPrefetchHits.incrementAndGet();
+            }
             cached.updateLastAccess();
             
             // PROACTIVE: Trigger prefetch on hits too! 
@@ -210,6 +232,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
             return cached.getData();
         }
         
+        recentMisses.incrementAndGet();
         cacheMisses.incrementAndGet();
         
         // Read chunk from file
@@ -334,9 +357,11 @@ public class MMapReadAheadEngine implements AutoCloseable {
             currentModified = System.currentTimeMillis();
         }
         
+        long currentSize = fileChannel.size();
         LRFHeader header = cachedHeader;
         if (header != null && currentModified <= lastFileModified && 
-            (System.currentTimeMillis() - lastHeaderRefresh < 5000)) {
+            currentSize == lastFileSize && // Check for growth
+            (System.currentTimeMillis() - lastHeaderRefresh < 1000)) {
             return header;
         }
         
@@ -365,6 +390,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
             header = LRFHeader.read(ByteBuffer.wrap(headerData));
             cachedHeader = header;
             lastFileModified = currentModified;
+            lastFileSize = currentSize;
             lastHeaderRefresh = System.currentTimeMillis();
             return header;
         }
@@ -378,7 +404,13 @@ public class MMapReadAheadEngine implements AutoCloseable {
      * Cache a chunk with memory management.
      */
     private void cacheChunk(int chunkIndex, byte[] data) {
-        // ... (existing cache logic)
+        cacheChunk(chunkIndex, data, false);
+    }
+    
+    /**
+     * Cache a chunk with memory management.
+     */
+    private void cacheChunk(int chunkIndex, byte[] data, boolean prefetched) {
         // Check memory limits
         if (currentMemoryUsage.get() + data.length > maxMemoryUsage) {
             cleanupCache();
@@ -394,7 +426,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
             evictLRU();
         }
         
-        CachedChunk cached = new CachedChunk(data, System.currentTimeMillis());
+        CachedChunk cached = new CachedChunk(data, System.currentTimeMillis(), prefetched);
         chunkCache.put(chunkIndex, cached);
         currentMemoryUsage.addAndGet(data.length);
     }
@@ -441,16 +473,18 @@ public class MMapReadAheadEngine implements AutoCloseable {
             
             // 1. Extended Vector Prefetch (PRIORITY FOR HIGH SPEED)
             if (predictiveEnabled && (fVelX != 0 || fVelZ != 0)) {
-                 // Dynamic scale based on velocity
-                 int dynamicScale = predictionScale;
+                 // Dynamic scale based on velocity AND performance controller (v2.1)
+                 adjustDynamicLookahead();
+                 int controllerScale = dynamicLookahead;
+                 
                  if (isFastTravel) {
-                      dynamicScale = predictionScale * 2; // Up to 24 chunks ahead base
+                      controllerScale *= 2; // Up to 2x based on velocity
                       if (Math.abs(fVelX) > 4 || Math.abs(fVelZ) > 4) {
-                           dynamicScale = predictionScale * 4; // Up to 48 chunks ahead for speed 10
+                           controllerScale *= 2; // Up to 4x for extreme speeds
                       }
                  }
                  
-                 for (int k = 1; k <= dynamicScale; k++) {
+                 for (int k = 1; k <= controllerScale; k++) {
                       int lookAheadX = centerX + (fVelX * k);
                       int lookAheadZ = centerZ + (fVelZ * k);
                       
@@ -507,7 +541,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
                     byte[] data = readChunkDirect(coords[0], coords[1]);
                     if (data != null) {
                         int chunkIndex = LRFConstants.getChunkIndex(coords[0] & 31, coords[1] & 31);
-                        cacheChunk(chunkIndex, data);
+                        cacheChunk(chunkIndex, data, true);
                     }
                 } catch (IOException e) {
                     // Ignore prefetch errors
@@ -578,10 +612,40 @@ public class MMapReadAheadEngine implements AutoCloseable {
         
         System.out.println("[TurboMC] MMapReadAheadEngine stats: " +
                          "hits=" + hits + " misses=" + misses + " (" + String.format("%.1f%%", hitRate) + ") " +
-                         "prefetches=" + prefetches + " " +
+                         "p_hits=" + recentPrefetchHits.get() + " lookahead=" + dynamicLookahead + " " +
+                         "prefetch=" + prefetches + " " +
                          "cache=" + cacheSize + "/" + maxCacheSize + " " +
                          "memory=" + String.format("%.1f", avgMemoryUsage) + "MB " +
                          "elapsed=" + (elapsed / 1000) + "s");
+        
+        // Reset recent counters
+        recentHits.set(0);
+        recentMisses.set(0);
+        recentPrefetchHits.set(0);
+    }
+    
+    /**
+     * Controller (v2.1): Adjust lookahead based on prefetch efficiency and demand.
+     */
+    private void adjustDynamicLookahead() {
+        int rHits = recentHits.get();
+        int rMisses = recentMisses.get();
+        int rPrefetchHits = recentPrefetchHits.get();
+        int total = rHits + rMisses;
+        
+        if (total < 10) return; // Wait for sample size
+        
+        double hitRate = (double) rHits / total;
+        double efficiency = rHits > 0 ? (double) rPrefetchHits / rHits : 0;
+        
+        // If we have misses despite prefetching, increase lookahead (Scale up)
+        if (hitRate < 0.8 && dynamicLookahead < predictionScale * 2) {
+            dynamicLookahead++;
+        } 
+        // If we are hitting almost everything but efficiency is low (wasting IO on chunks we don't enter), scale down
+        else if (hitRate > 0.95 && efficiency < 0.4 && dynamicLookahead > Math.max(2, predictionScale / 2)) {
+            dynamicLookahead--;
+        }
     }
     
     /**
@@ -655,11 +719,13 @@ public class MMapReadAheadEngine implements AutoCloseable {
     private static class CachedChunk {
         private final byte[] data;
         private final long createTime;
+        private final boolean prefetched;
         private volatile long lastAccess;
         
-        CachedChunk(byte[] data, long createTime) {
+        CachedChunk(byte[] data, long createTime, boolean prefetched) {
             this.data = data;
             this.createTime = createTime;
+            this.prefetched = prefetched;
             this.lastAccess = createTime;
         }
         
@@ -675,6 +741,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
             return (currentTime - lastAccess) > 300000; // 5 minutes
         }
         
+        boolean isPrefetched() { return prefetched; }
         byte[] getData() { return data; }
         long getCreateTime() { return createTime; }
         long getLastAccess() { return lastAccess; }

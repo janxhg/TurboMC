@@ -178,6 +178,33 @@ public class TurboStorageManager implements AutoCloseable {
     }
     
     /**
+     * Check if a chunk is immediately available in cache or pending writes.
+     * v2.1 Optimization: Fast path for Moonrise status checks.
+     */
+    public boolean hasDataFor(Path regionPath, int chunkX, int chunkZ) {
+        if (isClosed.get()) return false;
+        Path finalPath = normalizePath(regionPath);
+        
+        // Check MMap cache
+        if (mmapEnabled) {
+            MMapReadAheadEngine engine = readAheadEngines.get(finalPath);
+            if (engine != null && engine.isCached(chunkX, chunkZ)) {
+                return true;
+            }
+        }
+        
+        // Check pending writes
+        if (batchEnabled) {
+            ChunkBatchSaver saver = batchSavers.get(finalPath);
+            if (saver != null && saver.hasPendingChunk(chunkX, chunkZ)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+
+    /**
      * Load a chunk using all available optimizations.
      * This is the main entry point for chunk loading.
      * 
@@ -299,18 +326,6 @@ public class TurboStorageManager implements AutoCloseable {
         System.arraycopy(data, 0, dataCopy, 0, data.length);
         
         LRFChunkEntry chunk = new LRFChunkEntry(chunkX, chunkZ, dataCopy);
-        
-        // Update integrity checksum after saving if enabled
-        if (integrityEnabled) {
-            return saveChunkInternal(finalPath, chunk)
-                .thenAccept(v -> {
-                    ChunkIntegrityValidator validator = getIntegrityValidator(finalPath);
-                    if (validator != null) {
-                        validator.updateChecksum(chunkX, chunkZ, dataCopy);
-                    }
-                });
-        }
-        
         return saveChunkInternal(finalPath, chunk);
     }
     
@@ -332,13 +347,23 @@ public class TurboStorageManager implements AutoCloseable {
                 try (LRFRegionWriter writer = new LRFRegionWriter(resource, chunk.getData() != null ? LRFConstants.COMPRESSION_LZ4 : LRFConstants.COMPRESSION_NONE)) {
                     writer.addChunk(chunk);
                     writer.flush();
+                    
+                    if (integrityEnabled) {
+                        ChunkIntegrityValidator validator = getIntegrityValidator(finalPath);
+                        if (validator != null) {
+                            validator.updateChecksum(chunk.getChunkX(), chunk.getChunkZ(), chunk.getData());
+                        }
+                    }
+                    
+                    // Invalidate header cache
+                    resource.invalidateHeader();
                 }
             } catch (IOException e) {
                 System.err.println("[TurboMC][Storage] Failed to save chunk " + 
                                  chunk.getChunkX() + "," + chunk.getChunkZ() + ": " + e.getMessage());
                 throw new RuntimeException(e);
             }
-        });
+        }, globalWriteExecutor);
     }
     
     /**
@@ -454,8 +479,26 @@ public class TurboStorageManager implements AutoCloseable {
                 int compressionType = LRFConstants.COMPRESSION_LZ4; // Default to LZ4
                 
                 // Use global shared executors
-                return new ChunkBatchSaver(resource, compressionType, globalCompressionExecutor, 
+                ChunkBatchSaver saver = new ChunkBatchSaver(resource, compressionType, globalCompressionExecutor, 
                                          globalWriteExecutor, batchSize, autoFlushDelay);
+                
+                // Unified post-flush action for extreme efficiency
+                saver.setPostFlushAction((chunks) -> {
+                    // Update integrity checksums for all chunks in batch AT ONCE
+                    if (integrityEnabled) {
+                        ChunkIntegrityValidator validator = getIntegrityValidator(path);
+                        if (validator != null) {
+                            for (LRFChunkEntry chunk : chunks) {
+                                validator.updateChecksum(chunk.getChunkX(), chunk.getChunkZ(), chunk.getData());
+                            }
+                        }
+                    }
+                    
+                    // Invalidate header cache ONCE per batch flush
+                    resource.invalidateHeader();
+                });
+                
+                return saver;
             } catch (IOException e) {
                 System.err.println("[TurboMC][Storage] Failed to create batch saver for " + path + ": " + e.getMessage());
                 return null;

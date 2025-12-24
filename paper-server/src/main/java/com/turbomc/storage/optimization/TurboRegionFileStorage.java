@@ -657,6 +657,29 @@ public class TurboRegionFileStorage extends RegionFileStorage {
         Path lrfRegionPath = regionFolder.resolve(String.format("r.%d.%d.lrf", chunkX >> 5, chunkZ >> 5));
 
         // If it's an LRF file, use the optimized Turbo motor
+        // Optimization v2.1: Use TurboStorageManager to check for in-flight or cached data BEFORE file check
+        TurboStorageManager manager = TurboStorageManager.getInstance();
+        if (manager.hasDataFor(lrfRegionPath, chunkX, chunkZ)) {
+            CompletableFuture<LRFChunkEntry> future = manager.loadChunk(lrfRegionPath, chunkX, chunkZ);
+            try {
+                LRFChunkEntry chunk = future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                if (chunk != null) {
+                    CompoundTag tag;
+                    byte[] data = chunk.getData();
+                    if (data.length > 5 && data[0] == 'T' && data[1] == 'N' && data[2] == 'B' && data[3] == 'T') {
+                        tag = com.turbomc.nbt.NBTConverter.fromPackedBinary(com.turbomc.nbt.PackedBinaryNBT.fromBytes(data));
+                    } else {
+                        tag = NbtIo.read(new DataInputStream(new ByteArrayInputStream(data)), NbtAccounter.unlimitedHeap());
+                    }
+                    return new ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData(
+                        ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData.ReadResult.SYNC_READ, null, tag, 0
+                    );
+                }
+            } catch (Exception e) {
+                // Fall through to file check
+            }
+        }
+
         if (java.nio.file.Files.exists(lrfRegionPath)) {
             // Read from LRF via StorageManager
             CompletableFuture<LRFChunkEntry> future = TurboStorageManager.getInstance().loadChunk(lrfRegionPath, chunkX, chunkZ);

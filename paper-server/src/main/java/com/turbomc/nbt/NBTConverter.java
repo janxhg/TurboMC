@@ -11,15 +11,20 @@ import java.util.Set;
  */
 public class NBTConverter {
 
+    private static final ThreadLocal<ByteArrayOutputStream> RECYCLABLE_BOS = 
+        ThreadLocal.withInitial(() -> new ByteArrayOutputStream(65536));
+
     /**
      * Converts a standard CompoundTag to PackedBinaryNBT.
      */
     public static PackedBinaryNBT toPackedBinary(CompoundTag root) {
         PackedBinaryNBT.Builder builder = new PackedBinaryNBT.Builder();
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
+        ByteArrayOutputStream bos = RECYCLABLE_BOS.get();
+        bos.reset();
         
         try (DataOutputStream dos = new DataOutputStream(bos)) {
             writeTag(root, dos, builder);
+            dos.flush();
         } catch (IOException e) {
             throw new RuntimeException("Error converting NBT to PackedBinary", e);
         }

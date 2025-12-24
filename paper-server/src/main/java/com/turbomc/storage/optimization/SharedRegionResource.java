@@ -27,6 +27,7 @@ public class SharedRegionResource implements AutoCloseable {
     private volatile LRFHeader cachedHeader;
     private volatile long lastHeaderRefresh;
     private volatile long lastFileModified;
+    private volatile long lastFileSize;
     private final Object headerLock = new Object();
     
     public SharedRegionResource(Path path) throws IOException {
@@ -80,9 +81,11 @@ public class SharedRegionResource implements AutoCloseable {
             currentModified = System.currentTimeMillis();
         }
         
+        long currentSize = channel.size();
         LRFHeader header = cachedHeader;
         if (header != null && currentModified <= lastFileModified && 
-            (System.currentTimeMillis() - lastHeaderRefresh < 1000)) {
+            currentSize == lastFileSize && 
+            (System.currentTimeMillis() - lastHeaderRefresh < 2000)) { // Increased TTL to 2s
             return header;
         }
         
@@ -116,8 +119,19 @@ public class SharedRegionResource implements AutoCloseable {
             header = LRFHeader.read(ByteBuffer.wrap(headerData));
             cachedHeader = header;
             lastFileModified = currentModified;
+            lastFileSize = currentSize;
             lastHeaderRefresh = System.currentTimeMillis();
             return header;
+        }
+    }
+    
+    /**
+     * Invalidate the cached header, forcing a re-read on next access.
+     */
+    public void invalidateHeader() {
+        synchronized (headerLock) {
+            cachedHeader = null;
+            lastHeaderRefresh = 0;
         }
     }
 
