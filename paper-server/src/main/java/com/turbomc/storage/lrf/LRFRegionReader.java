@@ -12,6 +12,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import com.turbomc.storage.optimization.SharedRegionResource;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -28,6 +29,7 @@ public class LRFRegionReader implements AutoCloseable {
     private final FileChannel channel;
     private final MappedByteBuffer mappedBuffer;
     private final LRFHeader header;
+    private final SharedRegionResource sharedResource;
     
     // Performance optimizations
     // Synchronized cache for raw bytes (decompressed or not, depending on usage)
@@ -52,6 +54,7 @@ public class LRFRegionReader implements AutoCloseable {
         this.filePath = filePath;
         this.file = new RandomAccessFile(filePath.toFile(), "r");
         this.channel = file.getChannel();
+        this.sharedResource = null;
         
         long fileSize = channel.size();
         
@@ -59,47 +62,61 @@ public class LRFRegionReader implements AutoCloseable {
         boolean mmapEnabled = com.turbomc.config.TurboConfig.getInstance().getBoolean("storage.mmap.enabled", true);
         
         MappedByteBuffer tempBuffer = null;
-        if (mmapEnabled) {
+        if (mmapEnabled && fileSize > 0) {
             try {
                 tempBuffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
-                System.out.println("[TurboMC] Opened LRF region (mmap): " + filePath.getFileName());
             } catch (IOException e) {
-                System.err.println("[TurboMC] Failed to mmap LRF region, falling back to standard I/O: " + e.getMessage());
+                System.err.println("[TurboMC] Failed to mmap LRF region: " + e.getMessage());
             }
         }
         this.mappedBuffer = tempBuffer;
         
-        // Initialize statistics BEFORE header reading (in case it fails and triggers close())
+        // Initialize header
+        this.header = readInternalHeader();
+        
+        // Initialize stats
         this.chunkCache = new Int2ObjectOpenHashMap<>();
         this.cacheHits = new AtomicLong(0);
         this.cacheMisses = new AtomicLong(0);
+    }
+    
+    /**
+     * Create reader using a shared resource.
+     */
+    public LRFRegionReader(SharedRegionResource resource) throws IOException {
+        this.filePath = resource.getPath();
+        this.file = null;
+        this.channel = resource.getChannel();
+        this.sharedResource = resource;
         
-        // Read and validate header (first 256 bytes)
+        resource.acquire();
+        
+        // Use shared mapping if available
+        this.mappedBuffer = resource.getOrCreateMappedBuffer(channel.size());
+        
+        // Initialize header
+        this.header = readInternalHeader();
+        
+        // Initialize stats
+        this.chunkCache = new Int2ObjectOpenHashMap<>();
+        this.cacheHits = new AtomicLong(0);
+        this.cacheMisses = new AtomicLong(0);
+    }
+    
+    private LRFHeader readInternalHeader() throws IOException {
+        if (sharedResource != null) {
+            return sharedResource.getHeader();
+        }
+        
         ByteBuffer headerBuffer = ByteBuffer.allocate(LRFConstants.HEADER_SIZE);
         if (mappedBuffer != null) {
-            ByteBuffer slice = mappedBuffer.slice();
-            slice.limit(LRFConstants.HEADER_SIZE);
-            headerBuffer.put(slice);
-            headerBuffer.rewind();
+            // Absolute get is concurrent-safe
+            mappedBuffer.get(0, headerBuffer.array());
         } else {
+            // Absolute read is concurrent-safe
             channel.read(headerBuffer, 0);
-            headerBuffer.rewind();
         }
-        
-        try {
-            this.header = LRFHeader.read(headerBuffer);
-        } catch (IllegalArgumentException e) {
-            close();
-            throw new IOException("Corrupted LRF header or invalid magic bytes: " + e.getMessage(), e);
-        }
-        
-        // Initialize performance components
-
-        
-        if (mappedBuffer == null) {
-            System.out.println("[TurboMC] Opened LRF region (standard IO): " + filePath.getFileName() + 
-                             " (" + header.getChunkCount() + " chunks)");
-        }
+        return LRFHeader.read(ByteBuffer.wrap(headerBuffer.array()));
     }
     
     /**
@@ -149,15 +166,39 @@ public class LRFRegionReader implements AutoCloseable {
         
         byte[] rawSectorData = new byte[size];
         
-        if (mappedBuffer != null) {
+        if (mappedBuffer != null && offset + size <= mappedBuffer.limit()) {
             // Zero-copy read from mmap
-            ByteBuffer threadLocalBuffer = mappedBuffer.duplicate();
-            threadLocalBuffer.position(offset);
-            threadLocalBuffer.get(rawSectorData);
+            try {
+                // Optimized concurrent access - absolute get is naturally thread-safe
+                mappedBuffer.get(offset, rawSectorData);
+            } catch (Exception e) {
+                // Fallback to standard I/O if mmap access fails
+                ByteBuffer readBuffer = ByteBuffer.wrap(rawSectorData);
+                channel.read(readBuffer, offset);
+            }
         } else {
-            // Standard I/O read
+            // Standard I/O read (or fallback for growth)
+            // Absolute channel.read(buffer, position) is naturally thread-safe for reading
             ByteBuffer readBuffer = ByteBuffer.wrap(rawSectorData);
-            channel.read(readBuffer, offset);
+            int bytesRead = channel.read(readBuffer, offset);
+            
+            if (bytesRead < size) {
+                // Retry loop for partial reads (concurrent growth)
+                int retries = 0;
+                while (bytesRead < size && retries < 3) {
+                    try { Thread.sleep(5); } catch (InterruptedException ignored) {}
+                    readBuffer = ByteBuffer.wrap(rawSectorData, bytesRead, size - bytesRead);
+                    int read = channel.read(readBuffer, offset + bytesRead);
+                    if (read > 0) {
+                        bytesRead += read;
+                    }
+                    retries++;
+                }
+            }
+            
+            if (bytesRead < size) {
+                return null;
+            }
         }
         
         // Parse Length Header (First 5 bytes: 4 length + 1 compression type)
@@ -361,16 +402,20 @@ public class LRFRegionReader implements AutoCloseable {
     public void close() throws IOException {
         try {
             clearCache();
-            // Critical Fix for Windows: Explicitly unmap the MappedByteBuffer
-            if (mappedBuffer != null && mappedBuffer.isDirect()) {
-                cleanBuffer(mappedBuffer);
-            }
         } finally {
-            if (channel != null && channel.isOpen()) {
-                channel.close();
-            }
-            if (file != null) {
-                file.close();
+            if (sharedResource != null) {
+                sharedResource.close();
+            } else {
+                // Critical Fix for Windows: Explicitly unmap the MappedByteBuffer
+                if (mappedBuffer != null && mappedBuffer.isDirect()) {
+                    cleanBuffer(mappedBuffer);
+                }
+                if (channel != null && channel.isOpen()) {
+                    channel.close();
+                }
+                if (file != null) {
+                    file.close();
+                }
             }
         }
     }

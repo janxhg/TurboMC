@@ -57,8 +57,8 @@ On NVMe hardware, TurboMC v2.0.0 disables the L1 RAM cache by default to prevent
 
 ## Optimization Techniques Used in v2.0
 
-### 1. Predictive Prefetching (Scale 12x)
-Analyzing player movement patterns to pre-load 12 chunks ahead in the direction of travel.
+### 1. Proactive Predictive Prefetching (Scale 48x)
+Analizando patrones de movimiento en cada acceso para pre-cargar hasta 48 chunks (800 blocks) en ráfaga antes de que el jugador los alcance.
 
 ### 2. OVF RLE Compression
 Run-Length Encoding for voxel data, optimized for ultra-fast decompression in <20ms for 16M blocks.

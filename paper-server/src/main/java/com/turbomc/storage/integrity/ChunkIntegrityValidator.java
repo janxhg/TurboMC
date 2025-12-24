@@ -248,8 +248,14 @@ public class ChunkIntegrityValidator implements AutoCloseable {
             ChunkChecksum old = checksums.put(chunkIndex, newChecksum);
             if (old != null) {
                 checksumStorageSize.addAndGet(estimateChecksumSize(newChecksum) - estimateChecksumSize(old));
+                if (System.getProperty("turbomc.debug") != null) {
+                    System.out.println("[TurboMC][Integrity] Updated checksum for chunk [" + chunkX + ", " + chunkZ + "]");
+                }
             } else {
                 checksumStorageSize.addAndGet(estimateChecksumSize(newChecksum));
+                if (System.getProperty("turbomc.debug") != null) {
+                    System.out.println("[TurboMC][Integrity] Initial checksum for chunk [" + chunkX + ", " + chunkZ + "]");
+                }
             }
         }
         lastValidationTime.put(chunkIndex, System.currentTimeMillis());

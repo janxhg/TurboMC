@@ -57,7 +57,10 @@ decompress-threads = 2
 compress-threads = 2
 
 # Number of write threads for saving
-save-threads = 1
+save-threads = 2
+
+# Global executors are now scalable (v2.0): 
+# TurboMC uses up to 16 load threads and 32 decompression threads by default on high-core systems.
 
 # Maximum chunks per batch
 batch-size = 32
@@ -87,7 +90,7 @@ prefetch-batch-size = 32
 predictive-enabled = true
 
 # Prediction strength (how many chunks ahead to look)
-# Recommended: 12 for high speed flight (speed 10+)
+# Recommended: 12 (Base). At high speeds (flyspeed 10), TurboMC scales this automatically up to 4x (48 chunks).
 prediction-scale = 12
 
 # Maximum memory usage in MB

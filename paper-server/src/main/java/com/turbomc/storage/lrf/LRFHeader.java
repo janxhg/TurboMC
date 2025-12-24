@@ -150,6 +150,13 @@ public class LRFHeader {
     }
     
     /**
+     * Create an empty header for a new file.
+     */
+    public static LRFHeader createEmpty() {
+        return new LRFHeader(LRFConstants.FORMAT_VERSION, 0, LRFConstants.COMPRESSION_LZ4);
+    }
+
+    /**
      * Write header to a ByteBuffer.
      * 
      * @param buffer ByteBuffer to write to
@@ -194,13 +201,10 @@ public class LRFHeader {
         int index = LRFConstants.getChunkIndex(chunkX, chunkZ);
         if (!chunkExists[index]) return 0;
         
-        // FIXED: Use thread-safe buffer access with position isolation
-        ByteBuffer bufferCopy;
+        int entry;
         synchronized (offsetTable) {
-            bufferCopy = offsetTable.duplicate();
-            bufferCopy.position(index * 4);
+            entry = offsetTable.getInt(index * 4);
         }
-        int entry = bufferCopy.getInt();
         int offsetSectors = (entry >>> 8) & 0xFFFFFF;
         return offsetSectors * 256;
     }
@@ -216,13 +220,10 @@ public class LRFHeader {
         int index = LRFConstants.getChunkIndex(chunkX, chunkZ);
         if (!chunkExists[index]) return 0;
         
-        // FIXED: Use thread-safe buffer access with position isolation
-        ByteBuffer bufferCopy;
+        int entry;
         synchronized (offsetTable) {
-            bufferCopy = offsetTable.duplicate();
-            bufferCopy.position(index * 4);
+            entry = offsetTable.getInt(index * 4);
         }
-        int entry = bufferCopy.getInt();
         int sizeSectors = entry & 0xFF;
         return sizeSectors * 4096;
     }
@@ -243,17 +244,13 @@ public class LRFHeader {
      * Set chunk offset and size (for writing).
      */
     public void setChunkData(int chunkX, int chunkZ, int offset, int size) {
-        // FIXED: Use thread-safe buffer access with position isolation
         int index = LRFConstants.getChunkIndex(chunkX, chunkZ);
         int offsetSectors = offset / 256;
         int sizeSectors = (size + 4095) / 4096; // Round up to sectors
         
-        ByteBuffer bufferCopy;
         synchronized (offsetTable) {
-            bufferCopy = offsetTable.duplicate();
-            bufferCopy.position(index * 4);
+            offsetTable.putInt(index * 4, (offsetSectors << 8) | (sizeSectors & 0xFF));
         }
-        bufferCopy.putInt((offsetSectors << 8) | (sizeSectors & 0xFF));
         
         // Update existence flag
         chunkExists[index] = size > 0;

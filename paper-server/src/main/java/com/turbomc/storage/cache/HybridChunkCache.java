@@ -5,6 +5,7 @@ import com.turbomc.storage.lrf.LRFChunkEntry;
 import com.turbomc.storage.lrf.LRFRegionReader;
 import com.turbomc.storage.lrf.LRFRegionWriter;
 import com.turbomc.storage.mmap.MMapReadAheadEngine;
+import com.turbomc.storage.optimization.SharedRegionResource;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;

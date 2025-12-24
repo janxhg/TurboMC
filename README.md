@@ -20,19 +20,20 @@ TurboMC redefine el rendimiento en Minecraft. Reemplaza el almacenamiento MCA po
 
 ---
 
-## 🧱 Almacenamiento LRF v2
-- **Motor de I/O Predictivo**: Analiza vectores de movimiento para pre-cargar chunks.
-- **Integridad Total**: Fixes de descompresión Zstd que garantizan cero corrupción.
-- **Optimizado para NVMe**: Bypass de cache L1 para maximizar el throughput de hardware moderno.
-- **Ahorro de Espacio**: Compresión Zstd/LZ4 adaptativa.
+## 🧱 Almacenamiento LRF v2 (Ultra-Estable)
+- **Motor de I/O Predictivo Proactivo**: Analiza vectores de movimiento en cada acceso para pre-cargar chunks mucho antes de que el jugador los necesite.
+- **Lookahead Dinámico de 48 Chunks**: Escalado automático según la velocidad del jugador.
+- **TNBT Transcoding**: Integración perfecta con entidades y POI de Minecraft vainilla.
+- **Optimizado para NVMe**: Acceso directo mediante MMap sin cuellos de botella de caché de software.
+- **Ahorro de Espacio**: Compresión LZ4 ultra-rápida por defecto.
 
 ---
 
 ## ⚡ Rendimiento de Próxima Generación
-- **SIMD Collision Engine**: Vector API para físicas sin lag.
-- **MMap Read-Ahead Engine**: Lectura directa a memoria del SO.
-- **Prediction Scale 12x**: Prefetching agresivo para flyspeed 10+.
-- **Batch I/O v2**: Procesamiento en ráfagas de 32 chunks.
+- **SIMD Collision Engine**: Vector API para físicas paralelas.
+- **Extreme Pre-fetching Engine**: Lookahead de hasta 800 bloques en la dirección de viaje.
+- **Scalable I/O Pipeline**: Arquitectura de hilos global con hasta 32 workers de descompresión.
+- **Batch I/O v2**: Procesamiento asíncrono optimizado para Folia/Moonrise.
 
 ---
 

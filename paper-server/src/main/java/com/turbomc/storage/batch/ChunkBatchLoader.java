@@ -8,6 +8,7 @@ import com.turbomc.storage.lrf.LRFRegionReader;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Path;
+import com.turbomc.storage.optimization.SharedRegionResource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -43,6 +44,7 @@ public class ChunkBatchLoader implements AutoCloseable {
     private final java.util.Queue<QueuedChunk> waitingQueue;
     private final AtomicInteger queueSize;
     private final boolean isSharedPool;
+    private final SharedRegionResource sharedResource;
     
     // Configuration
     private final int loadThreads;
@@ -71,8 +73,8 @@ public class ChunkBatchLoader implements AutoCloseable {
      * @param regionPath Path to the LRF region file
      * @throws IOException if file cannot be opened
      */
-    public ChunkBatchLoader(Path regionPath) throws IOException {
-        this(regionPath, 
+    public ChunkBatchLoader(SharedRegionResource resource) throws IOException {
+        this(resource, 
              Runtime.getRuntime().availableProcessors() / 2,
              Math.max(1, Runtime.getRuntime().availableProcessors() / 4),
              32,  // max batch size
@@ -99,10 +101,11 @@ public class ChunkBatchLoader implements AutoCloseable {
      * @param maxConcurrentLoads Maximum concurrent loading operations
      * @throws IOException if file cannot be opened
      */
-    public ChunkBatchLoader(Path regionPath, ExecutorService loadExecutor, 
+    public ChunkBatchLoader(SharedRegionResource resource, ExecutorService loadExecutor, 
                            ExecutorService decompressionExecutor,
                            int maxBatchSize, int maxConcurrentLoads) throws IOException {
-        this.regionPath = regionPath;
+        this.regionPath = resource.getPath();
+        this.sharedResource = resource;
         this.loadExecutor = loadExecutor;
         this.decompressionExecutor = decompressionExecutor;
         this.maxBatchSize = maxBatchSize;
@@ -132,21 +135,23 @@ public class ChunkBatchLoader implements AutoCloseable {
             this.lastFileModified = 0;
         }
         
+        resource.acquire();
         // Initialize region reader
         refreshRegionReader();
         
         System.out.println("[TurboMC] ChunkBatchLoader initialized (SharedPools): " + regionPath.getFileName() +
                          " (batch size: " + maxBatchSize +
-                         ", concurrent loads: " + maxConcurrentLoads + ")");
+                         ", concurrent loads: " + maxConcurrentLoads + ")" + (sharedResource != null ? " [SHARED]" : ""));
     }
     
     /**
      * @deprecated Use constructor with shared executors
      */
     @Deprecated
-    public ChunkBatchLoader(Path regionPath, int loadThreads, int decompressionThreads,
+    public ChunkBatchLoader(SharedRegionResource resource, int loadThreads, int decompressionThreads,
                            int maxBatchSize, int maxConcurrentLoads) throws IOException {
-        this.regionPath = regionPath;
+        this.regionPath = resource.getPath();
+        this.sharedResource = resource;
         this.loadThreads = loadThreads;
         this.decompressionThreads = decompressionThreads;
         this.maxBatchSize = maxBatchSize;
@@ -381,7 +386,7 @@ public class ChunkBatchLoader implements AutoCloseable {
                 reader = regionReader;
                 if (reader == null) {
                     try {
-                        reader = new LRFRegionReader(regionPath);
+                        reader = new LRFRegionReader(sharedResource);
                         regionReader = reader;
                         lastReaderRefresh = System.currentTimeMillis();
                     } catch (IOException e) {
@@ -408,7 +413,7 @@ public class ChunkBatchLoader implements AutoCloseable {
             }
             
             try {
-                regionReader = new LRFRegionReader(regionPath);
+                regionReader = new LRFRegionReader(sharedResource);
                 lastReaderRefresh = System.currentTimeMillis();
             } catch (IOException e) {
                 System.err.println("[TurboMC] Failed to refresh region reader: " + e.getMessage());
@@ -494,6 +499,10 @@ public class ChunkBatchLoader implements AutoCloseable {
                         regionReader.close();
                         regionReader = null;
                     }
+                }
+                
+                if (sharedResource != null) {
+                    sharedResource.close();
                 }
                 
                 System.out.println("[TurboMC] ChunkBatchLoader closed: " + getStats());

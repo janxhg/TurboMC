@@ -2,6 +2,7 @@ package com.turbomc.storage.optimization;
 
 import com.turbomc.config.TurboConfig;
 import com.turbomc.compression.TurboCompressionService;
+import com.turbomc.storage.optimization.SharedRegionResource;
 import com.turbomc.storage.lrf.LRFConstants;
 import com.turbomc.storage.lrf.LRFChunkEntry;
 import com.turbomc.storage.lrf.LRFRegionReader;
@@ -638,10 +639,110 @@ public class TurboRegionFileStorage extends RegionFileStorage {
                 validator.close();
                 reader.close();
             }
-            
-        } catch (Exception e) {
+                    } catch (Exception e) {
             System.err.println("[TurboMC][RegionStorage] Failed to create validator for region " + regionFileName + ": " + e.getMessage());
             return CompletableFuture.completedFuture(new java.util.ArrayList<>());
         }
+    }
+
+    @Override
+    public ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData moonrise$readData(
+        final int chunkX, final int chunkZ
+    ) throws IOException {
+        if (!useTurboFeatures) {
+            return super.moonrise$readData(chunkX, chunkZ);
+        }
+
+        ChunkPos pos = new ChunkPos(chunkX, chunkZ);
+        Path lrfRegionPath = regionFolder.resolve(String.format("r.%d.%d.lrf", chunkX >> 5, chunkZ >> 5));
+
+        // If it's an LRF file, use the optimized Turbo motor
+        if (java.nio.file.Files.exists(lrfRegionPath)) {
+            // Read from LRF via StorageManager
+            CompletableFuture<LRFChunkEntry> future = TurboStorageManager.getInstance().loadChunk(lrfRegionPath, chunkX, chunkZ);
+            
+            try {
+                LRFChunkEntry chunk = future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                if (chunk == null || chunk.getData().length == 0) {
+                    return new ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData(
+                        ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData.ReadResult.NO_DATA, null, null, 0
+                    );
+                }
+
+                // Convert data to CompoundTag (Fast path)
+                CompoundTag tag;
+                byte[] data = chunk.getData();
+                if (data.length > 5 && data[0] == 'T' && data[1] == 'N' && data[2] == 'B' && data[3] == 'T') {
+                    tag = com.turbomc.nbt.NBTConverter.fromPackedBinary(com.turbomc.nbt.PackedBinaryNBT.fromBytes(data));
+                } else {
+                    tag = NbtIo.read(new DataInputStream(new ByteArrayInputStream(data)), NbtAccounter.unlimitedHeap());
+                }
+
+                return new ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData(
+                    ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData.ReadResult.SYNC_READ, null, tag, 0
+                );
+            } catch (Exception e) {
+                System.err.println("[TurboMC][RegionStorage] Error in moonrise$readData Turbo path: " + e.getMessage());
+            }
+        }
+
+        return super.moonrise$readData(chunkX, chunkZ);
+    }
+
+    @Override
+    public ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData moonrise$startWrite(
+        final int chunkX, final int chunkZ, final CompoundTag compound
+    ) throws IOException {
+        if (!useTurboFeatures || compound == null) {
+            return super.moonrise$startWrite(chunkX, chunkZ, compound);
+        }
+
+        String storageFormat = TurboConfig.getInstance().getString("storage.format", "lrf");
+        if (!"lrf".equalsIgnoreCase(storageFormat)) {
+            return super.moonrise$startWrite(chunkX, chunkZ, compound);
+        }
+
+        // Optimized Turbo Path: Marshall to PackedBinary and hand off to StorageManager
+        final ChunkPos pos = new ChunkPos(chunkX, chunkZ);
+        Path regionPath = regionFolder.resolve(String.format("r.%d.%d.lrf", chunkX >> 5, chunkZ >> 5));
+
+        // Create the WriteData object but with a result that tells moonrise we handled it or it's handled via sync
+        // For TurboMC, we actually want to handle the write ASYNCHRONOUSLY but Moonrise expects a stream or a result.
+        // The cleanest way is to return a result that says SYNC_WRITE (or similar) or just use the vanilla stream
+        // but hijack the finishWrite.
+        
+        return super.moonrise$startWrite(chunkX, chunkZ, compound);
+    }
+
+    @Override
+    public void moonrise$finishWrite(
+        final int chunkX, final int chunkZ, final ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData writeData
+    ) throws IOException {
+        if (!useTurboFeatures || writeData.result() == ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.WriteData.WriteResult.DELETE) {
+            super.moonrise$finishWrite(chunkX, chunkZ, writeData);
+            return;
+        }
+
+        String storageFormat = TurboConfig.getInstance().getString("storage.format", "lrf");
+        if (!"lrf".equalsIgnoreCase(storageFormat)) {
+            super.moonrise$finishWrite(chunkX, chunkZ, writeData);
+            return;
+        }
+
+        // Hijack the finish write to use TurboStorageManager
+        final ChunkPos pos = new ChunkPos(chunkX, chunkZ);
+        Path regionPath = regionFolder.resolve(String.format("r.%d.%d.lrf", chunkX >> 5, chunkZ >> 5));
+        
+        if (writeData.input() != null) {
+            byte[] data = com.turbomc.nbt.NBTConverter.toPackedBinary(writeData.input()).toBytes();
+            TurboStorageManager.getInstance().saveChunk(regionPath, chunkX, chunkZ, data);
+            
+            if (verbose) {
+                System.out.println("[TurboMC][RegionStorage] Hijacked Moonrise finishWrite for LRF: " + pos);
+            }
+            return;
+        }
+
+        super.moonrise$finishWrite(chunkX, chunkZ, writeData);
     }
 }

@@ -1,7 +1,7 @@
 """
 ===============================================================================
 TURBOMC - CARACTERÍSTICAS COMPLETAS IMPLEMENTADAS
-Versión 1.6.0 | Java 21+ | PaperMC Fork Optimizado
+Versión 2.0.0 | Java 21+ | PaperMC Fork Optimizado
 ===============================================================================
 
 # SISTEMA DE ALMACENAMIENTO LRF (LINEAR REGION FORMAT)
@@ -12,10 +12,13 @@ Versión 1.6.0 | Java 21+ | PaperMC Fork Optimizado
 - LRFHeader: Gestor de headers LRF con metadatos y checksums
 - LRFChunkEntry: Entrada de chunk con compresión y validación
 - LRFConstants: Constantes y configuraciones del sistema LRF
-- LRFRegionFileAdapter: Adaptador para compatibilidad con RegionFileStorage
+- LRFRegionFileAdapter: Adaptador de compatibilidad con TNBT-to-NBT Transcoding (v2.0)
 
 ## Optimizadores de Almacenamiento
-- MMapReadAheadEngine: Memory-mapped I/O con prefetching inteligente [ENHANCED v2.0.0]
+- MMapReadAheadEngine: Memory-mapped I/O con prefetching proactivo de alta velocidad [ENHANCED v2.0.0]
+  - Lookahead dinámico (hasta 48 chunks) basado en velocidad.
+  - Dirección bias (vector analysis) para priorizar chunks en ruta.
+  - Throttling inteligente para evitar saturación de IO.
 - ChunkBatchLoader: Carga asíncrona de chunks en lotes
 - ChunkBatchSaver: Guardado asíncrono de chunks en lotes
 - TurboCacheManager: Gestor de caché multinivel (Disabled by default on NVMe)

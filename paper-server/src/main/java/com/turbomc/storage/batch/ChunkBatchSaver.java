@@ -17,6 +17,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import com.turbomc.storage.optimization.SharedRegionResource;
 import java.util.concurrent.ConcurrentHashMap;
 import net.minecraft.world.level.ChunkPos;
 
@@ -46,6 +48,11 @@ public class ChunkBatchSaver implements AutoCloseable {
     private final ConcurrentHashMap<Long, LRFChunkEntry> inflightChunks;
     private final long startTime;
     private final boolean isSharedPool;
+    private final SharedRegionResource sharedResource;
+    
+    // Persistent writer
+    private LRFRegionWriter regionWriter;
+    private long lastForceTime;
     
     // Configuration
     private final int compressionThreads;
@@ -61,8 +68,8 @@ public class ChunkBatchSaver implements AutoCloseable {
      * @param regionPath Path to the LRF region file
      * @param compressionType Compression algorithm to use
      */
-    public ChunkBatchSaver(Path regionPath, int compressionType) {
-        this(regionPath, compressionType, 
+    public ChunkBatchSaver(SharedRegionResource resource, int compressionType) {
+        this(resource, compressionType, 
              Runtime.getRuntime().availableProcessors() / 2,
              1, // Force single writer thread per region to prevent corruption
              64, 
@@ -88,16 +95,26 @@ public class ChunkBatchSaver implements AutoCloseable {
      * @param batchSize Maximum chunks per batch
      */
     public ChunkBatchSaver(Path regionPath, int compressionType, 
-                          ExecutorService compressionExecutor, ExecutorService writeExecutor, int batchSize) {
-        this.regionPath = regionPath;
+                          ExecutorService compressionExecutor, ExecutorService writeExecutor, int batchSize) throws IOException {
+        this(new SharedRegionResource(regionPath), compressionType, compressionExecutor, writeExecutor, batchSize, 500L);
+    }
+
+    public ChunkBatchSaver(SharedRegionResource resource, int compressionType, 
+                          ExecutorService compressionExecutor, ExecutorService writeExecutor, 
+                          int batchSize, long autoFlushDelayMs) {
+        this.regionPath = resource.getPath();
+        this.sharedResource = resource;
         this.compressionType = compressionType;
         this.compressionExecutor = compressionExecutor;
         this.writeExecutor = writeExecutor;
         this.batchSize = batchSize;
         this.compressionThreads = -1; // Shared pool
         this.writeThreads = -1;       // Shared pool
-        this.autoFlushDelayMs = 100; // Default 100ms
+        
+        this.autoFlushDelayMs = autoFlushDelayMs; 
+        
         this.lastFlushTime = System.currentTimeMillis();
+        this.lastForceTime = System.currentTimeMillis();
         this.isSharedPool = true;
         
         this.pendingChunks = new ArrayList<>(batchSize);
@@ -108,9 +125,11 @@ public class ChunkBatchSaver implements AutoCloseable {
         this.inflightChunks = new ConcurrentHashMap<>();
         this.startTime = System.currentTimeMillis();
         
-        System.out.println("[TurboMC] ChunkBatchSaver initialized (SharedPools): " + regionPath.getFileName() +
-                         " (compression: " + LRFConstants.getCompressionName(compressionType) +
-                         ", batch size: " + batchSize + ")");
+        if (LRFRegionWriter.isVerbose()) {
+            System.out.println("[TurboMC] ChunkBatchSaver initialized (SharedPools): " + regionPath.getFileName() +
+                             " (compression: " + LRFConstants.getCompressionName(compressionType) +
+                             ", batch size: " + batchSize + ", delay: " + autoFlushDelayMs + "ms)");
+        }
     }
     
     /**
@@ -118,9 +137,10 @@ public class ChunkBatchSaver implements AutoCloseable {
      * @deprecated Use constructor with shared executors
      */
     @Deprecated
-    public ChunkBatchSaver(Path regionPath, int compressionType, 
+    public ChunkBatchSaver(SharedRegionResource resource, int compressionType, 
                           int compressionThreads, int writeThreads, int batchSize, long autoFlushDelayMs) {
-        this.regionPath = regionPath;
+        this.regionPath = resource.getPath();
+        this.sharedResource = resource;
         this.compressionType = compressionType;
         this.batchSize = batchSize;
         this.autoFlushDelayMs = autoFlushDelayMs;
@@ -177,7 +197,12 @@ public class ChunkBatchSaver implements AutoCloseable {
             } else if (pendingChunks.size() == 1) {
                 // First chunk in batch, schedule a flush after delay
                 CompletableFuture.delayedExecutor(autoFlushDelayMs, TimeUnit.MILLISECONDS)
-                    .execute(this::flushBatch);
+                    .execute(() -> {
+                        // Double-check if we still need to flush after the delay
+                        if (System.currentTimeMillis() - lastFlushTime >= autoFlushDelayMs) {
+                            flushBatch();
+                        }
+                    });
             }
         }
         return completionFuture;
@@ -317,13 +342,29 @@ public class ChunkBatchSaver implements AutoCloseable {
     /**
      * Write a batch of compressed chunks to file.
      */
-    private CompletableFuture<Void> writeBatch(List<CompressedChunk> compressedChunks) {
+    private synchronized CompletableFuture<Void> writeBatch(List<CompressedChunk> compressedChunks) {
         return CompletableFuture.runAsync(() -> {
-            try (LRFRegionWriter writer = new LRFRegionWriter(regionPath, compressionType)) {
-                for (CompressedChunk compressedChunk : compressedChunks) {
-                    writer.addChunk(compressedChunk.originalChunk);
+            try {
+                // Initialize writer lazily
+                if (regionWriter == null) {
+                    regionWriter = new LRFRegionWriter(sharedResource, compressionType);
                 }
-                writer.flush();
+                
+                // Write chunks sequentially - already synchronized in LRFRegionWriter, 
+                // but we stay synchronized here to ensure flush() follows immediately
+                for (CompressedChunk compressedChunk : compressedChunks) {
+                    regionWriter.addChunk(compressedChunk.originalChunk);
+                }
+                
+                // Smart flushing: Only force fsync if 2 seconds passed OR batch is large
+                boolean shouldForce = (System.currentTimeMillis() - lastForceTime > 2000) || 
+                                     (compressedChunks.size() >= batchSize / 2);
+                
+                regionWriter.flush(shouldForce);
+                
+                if (shouldForce) {
+                    lastForceTime = System.currentTimeMillis();
+                }
             } catch (IOException e) {
                 throw new RuntimeException("Failed to write batch to " + regionPath, e);
             }
@@ -395,8 +436,13 @@ public class ChunkBatchSaver implements AutoCloseable {
     public void close() throws IOException {
         if (isClosed.compareAndSet(false, true)) {
             try {
-                // Flush remaining chunks
-                flushBatch().get(30, TimeUnit.SECONDS);
+                // Flush remaining chunks with a mandatory fsync
+                if (regionWriter != null) {
+                    flushBatch().get(10, TimeUnit.SECONDS);
+                    regionWriter.flush(true);
+                    regionWriter.close();
+                    regionWriter = null;
+                }
                 
                 // Shutdown executors only if not shared
                 if (!isSharedPool) {

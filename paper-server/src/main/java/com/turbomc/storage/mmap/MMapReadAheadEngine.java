@@ -20,7 +20,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import com.turbomc.storage.optimization.SharedRegionResource;
 import java.util.concurrent.atomic.AtomicBoolean;
+import com.turbomc.storage.optimization.SharedRegionResource;
 import com.turbomc.compression.TurboCompressionService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -62,6 +64,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
     private final AtomicInteger cacheHits;
     private final AtomicInteger cacheMisses;
     private final AtomicInteger prefetchCount;
+    private final SharedRegionResource sharedResource;
     
     // File mapping
     private RandomAccessFile file;
@@ -72,9 +75,15 @@ public class MMapReadAheadEngine implements AutoCloseable {
     
     // Statistics
     private final long startTime;
+    
+    // Header cache
+    private volatile LRFHeader cachedHeader;
+    private long lastHeaderRefresh;
+    private long lastFileModified;
+    private final Object headerLock = new Object();
 
-    public MMapReadAheadEngine(Path regionPath) throws IOException {
-        this(regionPath, 
+    public MMapReadAheadEngine(SharedRegionResource resource) throws IOException {
+        this(resource, 
              512,  // max cache size (chunks)
              8,    // prefetch distance (chunks)
              32,   // prefetch batch size
@@ -85,28 +94,47 @@ public class MMapReadAheadEngine implements AutoCloseable {
     
     public MMapReadAheadEngine(Path regionPath, int maxCacheSize, int prefetchDistance,
                               int prefetchBatchSize, long maxMemoryUsage) throws IOException {
-        this(regionPath, maxCacheSize, prefetchDistance, prefetchBatchSize, maxMemoryUsage, true, 6);
+        this(new SharedRegionResource(regionPath), maxCacheSize, prefetchDistance, prefetchBatchSize, maxMemoryUsage, true, 6);
     }
 
-    public MMapReadAheadEngine(Path regionPath, int maxCacheSize, int prefetchDistance,
+    public MMapReadAheadEngine(SharedRegionResource resource, int maxCacheSize, int prefetchDistance,
                               int prefetchBatchSize, long maxMemoryUsage, 
                               boolean predictiveEnabled, int predictionScale) throws IOException {
-        this.regionPath = regionPath;
+        this(resource, maxCacheSize, prefetchDistance, prefetchBatchSize, maxMemoryUsage, predictiveEnabled, predictionScale, null);
+        
+        System.out.println("[TurboMC] MMapReadAheadEngine initialized: " + regionPath.getFileName() +
+                         " (cache: " + maxCacheSize + " chunks, " +
+                         "prefetch: " + prefetchDistance + " chunks, " +
+                         "predictive: " + predictiveEnabled + " (" + predictionScale + "), " +
+                         "memory: " + (maxMemoryUsage / 1024 / 1024) + "MB, " +
+                         "foreign-api: " + useForeignMemoryAPI + ")" + 
+                         (sharedResource != null ? " [SHARED]" : ""));
+    }
+    
+    // New constructor with executor
+    public MMapReadAheadEngine(SharedRegionResource resource, int maxCacheSize, int prefetchDistance,
+                              int prefetchBatchSize, long maxMemoryUsage, 
+                              boolean predictiveEnabled, int predictionScale, 
+                              ExecutorService prefetchExecutor) throws IOException {
+        this.regionPath = resource.getPath();
+        this.sharedResource = resource;
         this.maxCacheSize = maxCacheSize;
         this.prefetchDistance = prefetchDistance;
         this.prefetchBatchSize = prefetchBatchSize;
         this.maxMemoryUsage = maxMemoryUsage;
         this.predictiveEnabled = predictiveEnabled;
         this.predictionScale = predictionScale;
-        
-        // Detect if Foreign Memory API is available (Java 22+)
         this.useForeignMemoryAPI = detectForeignMemoryAPI();
         
-        this.prefetchExecutor = Executors.newFixedThreadPool(2, r -> {
-            Thread t = new Thread(r, "MMapReadAhead-Prefetch-" + System.currentTimeMillis());
-            t.setDaemon(true);
-            return t;
-        });
+        if (prefetchExecutor != null) {
+            this.prefetchExecutor = prefetchExecutor;
+        } else {
+            this.prefetchExecutor = Executors.newFixedThreadPool(4, r -> {
+                Thread t = new Thread(r, "MMapReadAhead-Prefetch-" + System.currentTimeMillis());
+                t.setDaemon(true);
+                return t;
+            });
+        }
         
         this.maintenanceExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "MMapReadAhead-Maintenance-" + System.currentTimeMillis());
@@ -122,15 +150,9 @@ public class MMapReadAheadEngine implements AutoCloseable {
         this.prefetchCount = new AtomicInteger(0);
         this.startTime = System.currentTimeMillis();
         
+        resource.acquire();
         initializeFileMapping();
         startMaintenanceTasks();
-        
-        System.out.println("[TurboMC] MMapReadAheadEngine initialized: " + regionPath.getFileName() +
-                         " (cache: " + maxCacheSize + " chunks, " +
-                         "prefetch: " + prefetchDistance + " chunks, " +
-                         "predictive: " + predictiveEnabled + " (" + predictionScale + "), " +
-                         "memory: " + (maxMemoryUsage / 1024 / 1024) + "MB, " +
-                         "foreign-api: " + useForeignMemoryAPI + ")");
     }
         
 
@@ -139,17 +161,14 @@ public class MMapReadAheadEngine implements AutoCloseable {
      * Initialize memory-mapped file access.
      */
     private void initializeFileMapping() throws IOException {
-        this.file = new RandomAccessFile(regionPath.toFile(), "r");
-        this.fileChannel = file.getChannel();
-        long fileSize = fileChannel.size();
+        this.file = null; // Controlled by sharedResource
+        this.fileChannel = sharedResource.getChannel();
         
-        // Foreign Memory API disabled for compatibility
-        useForeignMemoryAPI = false;
+        // Use shared mapping if available, or create one
+        this.mappedBuffer = sharedResource.getOrCreateMappedBuffer(fileChannel.size());
         
-        if (!useForeignMemoryAPI) {
-            // Fallback to traditional MappedByteBuffer
-            this.mappedBuffer = fileChannel.map(FileChannel.MapMode.READ_ONLY, 0, fileSize);
-            this.mappedBuffer.load(); // Preload entire file for SSD/NVMe
+        if (mappedBuffer != null) {
+            mappedBuffer.load(); // Preload for NVMe
         }
     }
     
@@ -183,6 +202,11 @@ public class MMapReadAheadEngine implements AutoCloseable {
         if (cached != null && !cached.isExpired()) {
             cacheHits.incrementAndGet();
             cached.updateLastAccess();
+            
+            // PROACTIVE: Trigger prefetch on hits too! 
+            // This ensures we keep moving ahead of the player even if they hit cached chunks.
+            triggerPrefetch(chunkX, chunkZ);
+            
             return cached.getData();
         }
         
@@ -223,13 +247,35 @@ public class MMapReadAheadEngine implements AutoCloseable {
             
             // Read from memory-mapped buffer
             byte[] data = new byte[size];
-            if (mappedBuffer != null) {
-                synchronized (mappedBuffer) {
-                    mappedBuffer.position(offset);
-                    mappedBuffer.get(data);
+            if (mappedBuffer != null && offset + size <= mappedBuffer.limit()) {
+                try {
+                    // Optimized concurrent access - absolute get available in Java 13+ (Minecraft 1.21 uses Java 21)
+                    mappedBuffer.get(offset, data);
+                } catch (Exception e) {
+                    // Fallback to standard I/O if mmap access fails (rare race)
+                    ByteBuffer buffer = ByteBuffer.wrap(data);
+                    fileChannel.read(buffer, offset);
                 }
             } else {
-                throw new IOException("No memory mapping available");
+                // Fallback to standard I/O if not mapped or beyond mapping limit (file growth)
+                int bytesRead = 0;
+                int retries = 0;
+                while (bytesRead < size && retries < 3) {
+                    ByteBuffer buffer = ByteBuffer.wrap(data, bytesRead, size - bytesRead);
+                    int read = fileChannel.read(buffer, offset + bytesRead);
+                    if (read <= 0) {
+                        if (retries < 2) {
+                            try { Thread.sleep(5); } catch (InterruptedException ignored) {}
+                        }
+                        retries++;
+                        continue;
+                    }
+                    bytesRead += read;
+                }
+                
+                if (bytesRead < size) {
+                    return null; // Avoid processing partial data
+                }
             }
             
             // Parse Local Chunk Header (5 bytes)
@@ -273,21 +319,55 @@ public class MMapReadAheadEngine implements AutoCloseable {
     }
     
     /**
-     * Read LRF header from memory-mapped file.
+     * Read LRF header from either cache or disk.
      */
     private LRFHeader readHeader() throws IOException {
-        byte[] headerData = new byte[LRFConstants.HEADER_SIZE];
-        
-        if (mappedBuffer != null) {
-            synchronized (mappedBuffer) {
-                mappedBuffer.position(0);
-                mappedBuffer.get(headerData);
-            }
-        } else {
-            throw new IOException("No memory mapping available");
+        if (sharedResource != null) {
+            return sharedResource.getHeader();
         }
         
-        return LRFHeader.read(ByteBuffer.wrap(headerData));
+        long currentModified;
+        // ... (rest of old logic for non-shared path)
+        try {
+            currentModified = java.nio.file.Files.getLastModifiedTime(regionPath).toMillis();
+        } catch (IOException e) {
+            currentModified = System.currentTimeMillis();
+        }
+        
+        LRFHeader header = cachedHeader;
+        if (header != null && currentModified <= lastFileModified && 
+            (System.currentTimeMillis() - lastHeaderRefresh < 5000)) {
+            return header;
+        }
+        
+        // Use sharedResource lock if possible, or local
+        Object lock = (sharedResource != null) ? sharedResource : this;
+        synchronized (lock) {
+            // Check again inside lock
+            header = cachedHeader;
+            if (header != null && currentModified <= lastFileModified && 
+                (System.currentTimeMillis() - lastHeaderRefresh < 5000)) {
+                return header;
+            }
+            
+            byte[] headerData = new byte[LRFConstants.HEADER_SIZE];
+            ByteBuffer headerBuffer = ByteBuffer.wrap(headerData);
+            
+            int read = fileChannel.read(headerBuffer, 0);
+            if (read < LRFConstants.HEADER_SIZE) {
+                if (mappedBuffer != null) {
+                    mappedBuffer.get(0, headerData);
+                } else {
+                    throw new IOException("Failed to read LRF header from " + regionPath);
+                }
+            }
+            
+            header = LRFHeader.read(ByteBuffer.wrap(headerData));
+            cachedHeader = header;
+            lastFileModified = currentModified;
+            lastHeaderRefresh = System.currentTimeMillis();
+            return header;
+        }
     }
     
     // Proactive movement prediction fields
@@ -337,7 +417,9 @@ public class MMapReadAheadEngine implements AutoCloseable {
         
         // Calculate velocity if this isn't the first access and it's nearby (not teleport)
         // High Speed Support: Increased threshold from 2 to 10 chunks to allow flyspeed 10
-        if (lastX != Integer.MIN_VALUE && Math.abs(centerX - lastX) <= 10 && Math.abs(centerZ - lastZ) <= 10) {
+        // Calculate velocity if this isn't the first access and it's nearby (not teleport)
+        // High Speed Support: Increased threshold from 2 to 10 chunks to allow flyspeed 10
+        if (lastX != Integer.MIN_VALUE && Math.abs(centerX - lastX) <= 12 && Math.abs(centerZ - lastZ) <= 12) {
              velX = centerX - lastX;
              velZ = centerZ - lastZ;
         }
@@ -345,78 +427,92 @@ public class MMapReadAheadEngine implements AutoCloseable {
         final int fVelX = velX;
         final int fVelZ = velZ;
         
+        // Throttling: If we are already prefetching many chunks for this region, skip
+        if (prefetchCount.get() > prefetchBatchSize * 4) {
+             // Throttled (avoid queue explosion)
+             // But we allow it if velocity is very high
+             if (Math.abs(fVelX) < 2 && Math.abs(fVelZ) < 2) return;
+        }
+        
         CompletableFuture.runAsync(() -> {
             List<int[]> chunksToPrefetch = new ArrayList<>();
             
-            // 1. Standard "Spatial" Prefetch (Radius)
-            // (Reduced radius if moving fast to save bandwidth for vector?)
-            // Keeping standard radius for consistency.
-            for (int dx = -prefetchDistance; dx <= prefetchDistance; dx++) {
-                // ... (rest of loop logic)
-                for (int dz = -prefetchDistance; dz <= prefetchDistance; dz++) {
-                    if (dx == 0 && dz == 0) continue; // Skip current chunk
-                    
-                    int chunkX = centerX + dx;
-                    int chunkZ = centerZ + dz;
-                    
-                    // 2. Vector Bias: If moving, prioritize chunks IN FRONT of movement
-                    // If fVel != 0, check if this chunk aligns with direction
-                    boolean isAhead = false;
-                    if (fVelX != 0 || fVelZ != 0) {
-                         // Dot product > 0 means "in front"
-                         int relX = dx;
-                         int relZ = dz;
-                         if (relX * fVelX + relZ * fVelZ > 0) {
-                             isAhead = true;
-                         }
-                    }
-                    
-                    int chunkIndex = LRFConstants.getChunkIndex(chunkX, chunkZ);
-                    
-                    // Only prefetch if not already cached
-                    if (!chunkCache.containsKey(chunkIndex)) {
-                        // If moving, skip chunks BEHIND us to save IO, unless very close
-                        if ((fVelX != 0 || fVelZ != 0) && !isAhead && Math.abs(dx) > 1 && Math.abs(dz) > 1) {
-                            continue;
-                        }
-                        
-                        chunksToPrefetch.add(new int[]{chunkX, chunkZ});
-                        
-                        // Limit batch size
-                        if (chunksToPrefetch.size() >= prefetchBatchSize) {
-                            break;
-                        }
-                    }
-                }
-                
-                if (chunksToPrefetch.size() >= prefetchBatchSize) {
-                    break;
-                }
-            }
+            boolean isFastTravel = Math.abs(fVelX) >= 2 || Math.abs(fVelZ) >= 2;
             
-            // 3. Extended Vector Prefetch (Look AHEAD further)
+            // 1. Extended Vector Prefetch (PRIORITY FOR HIGH SPEED)
             if (predictiveEnabled && (fVelX != 0 || fVelZ != 0)) {
-                 for (int k = prefetchDistance + 1; k <= prefetchDistance + predictionScale; k++) {
+                 // Dynamic scale based on velocity
+                 int dynamicScale = predictionScale;
+                 if (isFastTravel) {
+                      dynamicScale = predictionScale * 2; // Up to 24 chunks ahead base
+                      if (Math.abs(fVelX) > 4 || Math.abs(fVelZ) > 4) {
+                           dynamicScale = predictionScale * 4; // Up to 48 chunks ahead for speed 10
+                      }
+                 }
+                 
+                 for (int k = 1; k <= dynamicScale; k++) {
                       int lookAheadX = centerX + (fVelX * k);
                       int lookAheadZ = centerZ + (fVelZ * k);
-                      int idx = LRFConstants.getChunkIndex(lookAheadX, lookAheadZ);
+                      
+                      // Safety check: Stay within region bounds if possible
+                      int idx = LRFConstants.getChunkIndex(lookAheadX & 31, lookAheadZ & 31);
                       if (!chunkCache.containsKey(idx)) {
                            chunksToPrefetch.add(new int[]{lookAheadX, lookAheadZ});
+                           if (chunksToPrefetch.size() >= prefetchBatchSize) break;
                       }
                  }
             }
             
+            // Update pending count BEFORE loop
+            prefetchCount.addAndGet(chunksToPrefetch.size());
+            
+            // 2. Standard "Spatial" Prefetch (Radius) - ONLY IF NOT FILLING BUDGET WITH VECTOR
+            if (chunksToPrefetch.size() < prefetchBatchSize) {
+                for (int dx = -prefetchDistance; dx <= prefetchDistance; dx++) {
+                    for (int dz = -prefetchDistance; dz <= prefetchDistance; dz++) {
+                        if (dx == 0 && dz == 0) continue; 
+                        
+                        int chunkX = centerX + dx;
+                        int chunkZ = centerZ + dz;
+                        
+                        // Directional Bias: Skip chunks BEHIND us if moving fast
+                        if (isFastTravel) {
+                             // Using dot product to determine "behind"
+                             if (dx * fVelX + dz * fVelZ < 0) {
+                                  // This chunk is behind the movement vector
+                                  if (Math.abs(dx) > 1 || Math.abs(dz) > 1) {
+                                       continue; 
+                                  }
+                             }
+                        }
+                        
+                        int chunkIndex = LRFConstants.getChunkIndex(chunkX & 31, chunkZ & 31);
+                        if (!chunkCache.containsKey(chunkIndex)) {
+                            chunksToPrefetch.add(new int[]{chunkX, chunkZ});
+                            if (chunksToPrefetch.size() >= prefetchBatchSize) break;
+                        }
+                    }
+                    if (chunksToPrefetch.size() >= prefetchBatchSize) break;
+                }
+            }
             // Prefetch chunks
             for (int[] coords : chunksToPrefetch) {
+                // Stay within same region for THIS engine
+                if ((coords[0] >> 5) != (centerX >> 5) || (coords[1] >> 5) != (centerZ >> 5)) {
+                     prefetchCount.decrementAndGet();
+                     continue; 
+                }
+                
                 try {
                     byte[] data = readChunkDirect(coords[0], coords[1]);
                     if (data != null) {
-                        int chunkIndex = LRFConstants.getChunkIndex(coords[0], coords[1]);
+                        int chunkIndex = LRFConstants.getChunkIndex(coords[0] & 31, coords[1] & 31);
                         cacheChunk(chunkIndex, data);
-                        prefetchCount.incrementAndGet();
                     }
                 } catch (IOException e) {
                     // Ignore prefetch errors
+                } finally {
+                    prefetchCount.decrementAndGet();
                 }
             }
         }, prefetchExecutor);
@@ -534,19 +630,15 @@ public class MMapReadAheadEngine implements AutoCloseable {
                     maintenanceExecutor.shutdownNow();
                 }
                 
-                // Close memory mappings
-                // memorySession is disabled for compatibility
-                
-                if (mappedBuffer != null && mappedBuffer.isDirect()) {
-                    cleanBuffer(mappedBuffer);
-                }
-                
-                if (fileChannel != null) {
-                    fileChannel.close();
-                }
-                
-                if (file != null) {
-                    file.close();
+                if (sharedResource != null) {
+                    sharedResource.close();
+                } else {
+                    if (fileChannel != null && fileChannel.isOpen()) {
+                        fileChannel.close();
+                    }
+                    if (file != null) {
+                        file.close();
+                    }
                 }
                 
                 // Final statistics

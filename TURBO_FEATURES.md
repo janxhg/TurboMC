@@ -20,9 +20,10 @@ Reemplazo de alto rendimiento para el formato `.schem` de WorldEdit y FAWE.
 
 El motor de almacenamiento LRF ha sido re-ingenierizado en la v2.0 para soportar vuelos a velocidades extremas.
 
-- **Prediction Scale 12x:** El motor ahora pre-detecta el vector de movimiento del jugador y carga chunks hasta 12 posiciones por delante.
-- **Stutter-Free Flight:** Flyspeed 10 verificado sin tirones (micro-stuttering) gracias a la carga predictiva.
-- **Zstd Integrity Fix:** Corrección de la lectura de paddings en sectores LRF que eliminan errores de descompresión Zstd.
+- **Extreme Predictive Loading (48x scaled):** El motor ahora pre-detecta el vector de movimiento del jugador y carga chunks hasta **48 posiciones** por delante en modo de viaje rápido (flyspeed 10+).
+- **Proactive Prefetching:** A diferencia de la v1, el motor pre-carga de forma proactiva en cada acceso, garantizando fluidez total antes de entrar al nuevo chunk.
+- **Directional Bias:** Algoritmo de vectorización que prioriza el ancho de banda I/O solo en la dirección de viaje del jugador.
+- **LRF v2 Stabilization:** Formato estandarizado con 256-byte alignment y headers de 5-bytes.
 - **NVMe Optimized (Zero Cache Bias):** El sistema detecta hardware NVMe y desactiva el cache L1 de Java por defecto, eliminando un 95% de overhead de gestión de cache innecesario.
 
 ## 💾 Advanced Converters & Integration...
@@ -61,6 +62,7 @@ Formato binario optimizado para almacenamiento interno de NBT.
 
 - **Plugins:** Interactúan solo con NBT estándar (`CompoundTag`).
 - **Turbo:** Usa `PackedBinary` solo internamente para I/O.
+- **TNBT Transcoding (v2.0):** Capa de traducción automática en tiempo real que permite a los sistemas de Minecraft leer datos optimizados sin errores de compatibilidad (soluciona "Invalid tag id: 84").
 - **Features:** Deduplicación de strings, compresión LZ4, Header Magic `TNBT`.
 
 ### Binary Config Cache

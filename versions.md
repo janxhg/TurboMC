@@ -5,12 +5,12 @@ Fork avanzado de PaperMC con foco en **storage moderno**, **SIMD**, y **baja lat
 ---
 
 ## 🚀 v2.0.0 — The Speed Update (Current)
+- **Extreme Predictive Loading**: Engine de pre-carga proactivo basado en vectores de movimiento. Soporta `flyspeed 10` con lookahead dinámico de hasta **48 chunks**.
+- **LRF v2 Stabilization**: Estandarización del formato con header de 5-bytes y alineación de sectores de 256-bytes para eliminar corrupción.
+- **TNBT Transcoding**: Capa de compatibilidad automática que permite a los sistemas vainilla (Entidades, POI) leer datos optimizados de TurboMC sin errores.
 - **Optimized Voxel Format (OVF)**: Nuevo formato para estructuras con carga <20ms para 16M bloques.
-- **High-Speed Flight Ready**: Soporte oficial para `flyspeed 10` sin stuttering.
-- **NVMe Optimization**: Desactivación de caché L1 (RAM) por default (+95% throughput en hardware moderno).
-- **Zstd Padding Fix**: Corrección crítica en lectura de chunks alineados que eliminan errores de descompresión.
-- **Aggressive Prefetching**: Predicción de movimiento extendida a 12 chunks (Prediction Scale 12x).
-- **Configuración Automática**: Defaults ajustados para servers de alto rendimiento.
+- **High-Throughput I/O**: Escalado de hilos global (hasta 32 hilos de descompresión) para manejar ráfagas masivas de pre-carga.
+- **NVMe Optimization**: Desactivación de caché L1 (RAM) por default (+95% throughput en hardware moderno mediante acceso directo mmap).
 
 ---
 

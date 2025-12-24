@@ -39,7 +39,9 @@ public class TurboStorageManager implements AutoCloseable {
     private final ConcurrentHashMap<Path, ChunkBatchLoader> batchLoaders;
     private final ConcurrentHashMap<Path, ChunkBatchSaver> batchSavers;
     private final ConcurrentHashMap<Path, MMapReadAheadEngine> readAheadEngines;
+    private final ConcurrentHashMap<Path, LRFRegionReader> regionReaders;
     private final ConcurrentHashMap<Path, ChunkIntegrityValidator> integrityValidators;
+    private final ConcurrentHashMap<Path, SharedRegionResource> sharedResources;
     
     // Configuration
     private final TurboConfig config;
@@ -62,18 +64,24 @@ public class TurboStorageManager implements AutoCloseable {
         this.batchLoaders = new ConcurrentHashMap<>();
         this.batchSavers = new ConcurrentHashMap<>();
         this.readAheadEngines = new ConcurrentHashMap<>();
+        this.regionReaders = new ConcurrentHashMap<>();
         this.integrityValidators = new ConcurrentHashMap<>();
+        this.sharedResources = new ConcurrentHashMap<>();
         this.isInitialized = new AtomicBoolean(false);
         this.isClosed = new AtomicBoolean(false);
         
         // Initialize global executors if batching is enabled
         if (config.getBoolean("storage.batch.enabled", true)) {
+            // Set LRF verbosity
+            LRFRegionWriter.setVerbose(config.getBoolean("storage.lrf.verbose", false));
+            
             int processors = Runtime.getRuntime().availableProcessors();
             
             // FIX: Cap thread counts to prevent explosion on high-core systems
-            final int MAX_LOAD_THREADS = 8;
-            final int MAX_WRITE_THREADS = 4;
+            final int MAX_LOAD_THREADS = 16;
+            final int MAX_WRITE_THREADS = 8;
             final int MAX_COMPRESSION_THREADS = 16;
+            final int MAX_DECOMPRESSION_THREADS = 32;
             
             // Scalable thread pool sizes with caps
             int loadThreads = Math.max(2, Math.min(config.getInt("storage.batch.global-load-threads", processors / 4), MAX_LOAD_THREADS));
@@ -183,9 +191,11 @@ public class TurboStorageManager implements AutoCloseable {
             throw new IllegalStateException("Storage manager is closed");
         }
         
+        final Path finalPath = normalizePath(regionPath);
+        
         // Try memory-mapped read-ahead first (fastest)
         if (mmapEnabled) {
-            MMapReadAheadEngine mmapEngine = getReadAheadEngine(regionPath);
+            MMapReadAheadEngine mmapEngine = getReadAheadEngine(finalPath);
             if (mmapEngine != null) {
                 try {
                     byte[] data = mmapEngine.readChunk(chunkX, chunkZ);
@@ -194,7 +204,7 @@ public class TurboStorageManager implements AutoCloseable {
                         
                         // Validate integrity if enabled
                         if (integrityEnabled) {
-                            return validateChunk(regionPath, chunkX, chunkZ, data)
+                            return validateChunk(finalPath, chunkX, chunkZ, data)
                                 .thenApply(report -> {
                                     if (report.isCorrupted()) {
                                         System.err.println("[TurboMC][Storage] Chunk corruption detected: " + 
@@ -215,7 +225,7 @@ public class TurboStorageManager implements AutoCloseable {
         // Check pending writes in BatchSaver (Read-Your-Writes Consistency)
         // This is critical for generation performance to avoid checking disk for chunks currently in write buffer
         if (batchEnabled) {
-            ChunkBatchSaver saver = batchSavers.get(regionPath);
+            ChunkBatchSaver saver = batchSavers.get(finalPath);
             if (saver != null) {
                 LRFChunkEntry pendingChunk = saver.getPendingChunk(chunkX, chunkZ);
                 if (pendingChunk != null) {
@@ -226,7 +236,7 @@ public class TurboStorageManager implements AutoCloseable {
         
         // Fallback to batch loader
         if (batchEnabled) {
-            ChunkBatchLoader loader = getBatchLoader(regionPath);
+            ChunkBatchLoader loader = getBatchLoader(finalPath);
             if (loader != null) {
                 CompletableFuture<LRFChunkEntry> future = loader.loadChunk(chunkX, chunkZ);
                 
@@ -234,7 +244,7 @@ public class TurboStorageManager implements AutoCloseable {
                 if (integrityEnabled) {
                     return future.thenCompose(chunk -> {
                         if (chunk != null) {
-                            return validateChunk(regionPath, chunkX, chunkZ, chunk.getData())
+                            return validateChunk(finalPath, chunkX, chunkZ, chunk.getData())
                                 .thenApply(report -> {
                                     if (report.isCorrupted()) {
                                         System.err.println("[TurboMC][Storage] Chunk corruption detected: " + 
@@ -254,15 +264,17 @@ public class TurboStorageManager implements AutoCloseable {
         // Final fallback to direct LRF reader
         return CompletableFuture.supplyAsync(() -> {
             try {
-                LRFRegionReader reader = new LRFRegionReader(regionPath);
-                LRFChunkEntry chunk = reader.readChunk(chunkX, chunkZ);
-                reader.close();
-                return chunk;
+                SharedRegionResource resource = getSharedResource(finalPath);
+                LRFRegionReader reader = getRegionReader(finalPath);
+                if (reader != null) {
+                    return reader.readChunk(chunkX, chunkZ);
+                }
+                return null;
             } catch (IOException e) {
                 System.err.println("[TurboMC][Storage] Failed to load chunk " + chunkX + "," + chunkZ + ": " + e.getMessage());
                 return null;
             }
-        });
+        }, globalLoadExecutor);
     }
     
     /**
@@ -280,28 +292,34 @@ public class TurboStorageManager implements AutoCloseable {
             throw new IllegalStateException("Storage manager is closed");
         }
         
-        LRFChunkEntry chunk = new LRFChunkEntry(chunkX, chunkZ, data);
+        final Path finalPath = normalizePath(regionPath);
+        
+        // Defensively copy the data to avoid issues with Paper reusing NBT buffers
+        byte[] dataCopy = new byte[data.length];
+        System.arraycopy(data, 0, dataCopy, 0, data.length);
+        
+        LRFChunkEntry chunk = new LRFChunkEntry(chunkX, chunkZ, dataCopy);
         
         // Update integrity checksum after saving if enabled
         if (integrityEnabled) {
-            return saveChunkInternal(regionPath, chunk)
+            return saveChunkInternal(finalPath, chunk)
                 .thenAccept(v -> {
-                    ChunkIntegrityValidator validator = getIntegrityValidator(regionPath);
+                    ChunkIntegrityValidator validator = getIntegrityValidator(finalPath);
                     if (validator != null) {
-                        validator.updateChecksum(chunkX, chunkZ, data);
+                        validator.updateChecksum(chunkX, chunkZ, dataCopy);
                     }
                 });
         }
         
-        return saveChunkInternal(regionPath, chunk);
+        return saveChunkInternal(finalPath, chunk);
     }
     
     /**
      * Internal chunk saving method.
      */
-    private CompletableFuture<Void> saveChunkInternal(Path regionPath, LRFChunkEntry chunk) {
+    private CompletableFuture<Void> saveChunkInternal(final Path finalPath, LRFChunkEntry chunk) {
         if (batchEnabled) {
-            ChunkBatchSaver saver = getBatchSaver(regionPath);
+            ChunkBatchSaver saver = getBatchSaver(finalPath);
             if (saver != null) {
                 return saver.saveChunk(chunk);
             }
@@ -310,10 +328,11 @@ public class TurboStorageManager implements AutoCloseable {
         // Fallback to direct LRF writer
         return CompletableFuture.runAsync(() -> {
             try {
-                LRFRegionWriter writer = new LRFRegionWriter(regionPath);
-                writer.addChunk(chunk);
-                writer.flush();
-                writer.close();
+                SharedRegionResource resource = getSharedResource(finalPath);
+                try (LRFRegionWriter writer = new LRFRegionWriter(resource, chunk.getData() != null ? LRFConstants.COMPRESSION_LZ4 : LRFConstants.COMPRESSION_NONE)) {
+                    writer.addChunk(chunk);
+                    writer.flush();
+                }
             } catch (IOException e) {
                 System.err.println("[TurboMC][Storage] Failed to save chunk " + 
                                  chunk.getChunkX() + "," + chunk.getChunkZ() + ": " + e.getMessage());
@@ -329,7 +348,8 @@ public class TurboStorageManager implements AutoCloseable {
      * @return CompletableFuture that completes when flush is done
      */
     public CompletableFuture<Void> flush(Path regionPath) {
-        ChunkBatchSaver saver = batchSavers.get(regionPath);
+        Path finalPath = normalizePath(regionPath);
+        ChunkBatchSaver saver = batchSavers.get(finalPath);
         if (saver != null) {
             return saver.flushBatch();
         }
@@ -344,6 +364,7 @@ public class TurboStorageManager implements AutoCloseable {
      * @return CompletableFuture that completes with list of loaded chunks
      */
     public CompletableFuture<java.util.List<LRFChunkEntry>> loadChunks(Path regionPath, java.util.List<int[]> chunkCoords) {
+        regionPath = normalizePath(regionPath);
         if (batchEnabled) {
             ChunkBatchLoader loader = getBatchLoader(regionPath);
             if (loader != null) {
@@ -379,6 +400,7 @@ public class TurboStorageManager implements AutoCloseable {
      * Validate a chunk's integrity.
      */
     private CompletableFuture<ChunkIntegrityValidator.IntegrityReport> validateChunk(Path regionPath, int chunkX, int chunkZ, byte[] data) {
+        regionPath = normalizePath(regionPath);
         if (integrityEnabled) {
             ChunkIntegrityValidator validator = getIntegrityValidator(regionPath);
             if (validator != null) {
@@ -400,13 +422,15 @@ public class TurboStorageManager implements AutoCloseable {
     private ChunkBatchLoader getBatchLoader(Path regionPath) {
         if (!batchEnabled) return null;
         
-        return batchLoaders.computeIfAbsent(regionPath, path -> {
+        Path finalPath = normalizePath(regionPath);
+        return batchLoaders.computeIfAbsent(finalPath, path -> {
             try {
+                SharedRegionResource resource = getSharedResource(path);
                 int batchSize = config.getInt("storage.batch.batch-size", 32);
                 int maxConcurrentLoads = config.getInt("storage.batch.max-concurrent-loads", 64);
                 
                 // Use global shared executors
-                return new ChunkBatchLoader(path, globalLoadExecutor, globalDecompressionExecutor,
+                return new ChunkBatchLoader(resource, globalLoadExecutor, globalDecompressionExecutor,
                                            batchSize, maxConcurrentLoads);
             } catch (IOException e) {
                 System.err.println("[TurboMC][Storage] Failed to create batch loader for " + path + ": " + e.getMessage());
@@ -421,13 +445,21 @@ public class TurboStorageManager implements AutoCloseable {
     private ChunkBatchSaver getBatchSaver(Path regionPath) {
         if (!batchEnabled) return null;
         
-        return batchSavers.computeIfAbsent(regionPath, path -> {
-            int batchSize = config.getInt("storage.batch.batch-size", 32);
-            int compressionType = LRFConstants.COMPRESSION_LZ4; // Default to LZ4
-            
-            // Use global shared executors
-            return new ChunkBatchSaver(path, compressionType, globalCompressionExecutor, 
-                                     globalWriteExecutor, batchSize);
+        Path finalPath = normalizePath(regionPath);
+        return batchSavers.computeIfAbsent(finalPath, path -> {
+            try {
+                SharedRegionResource resource = getSharedResource(path);
+                int batchSize = config.getInt("storage.batch.batch-size", 32);
+                long autoFlushDelay = config.getLong("storage.batch.auto-flush-delay", 500);
+                int compressionType = LRFConstants.COMPRESSION_LZ4; // Default to LZ4
+                
+                // Use global shared executors
+                return new ChunkBatchSaver(resource, compressionType, globalCompressionExecutor, 
+                                         globalWriteExecutor, batchSize, autoFlushDelay);
+            } catch (IOException e) {
+                System.err.println("[TurboMC][Storage] Failed to create batch saver for " + path + ": " + e.getMessage());
+                return null;
+            }
         });
     }
     
@@ -437,20 +469,39 @@ public class TurboStorageManager implements AutoCloseable {
     private MMapReadAheadEngine getReadAheadEngine(Path regionPath) {
         if (!mmapEnabled) return null;
         
-        return readAheadEngines.computeIfAbsent(regionPath, path -> {
+        Path finalPath = normalizePath(regionPath);
+        return readAheadEngines.computeIfAbsent(finalPath, path -> {
             try {
+                SharedRegionResource resource = getSharedResource(path);
                 int maxCacheSize = config.getInt("storage.mmap.max-cache-size", 512);
                 int prefetchDistance = config.getInt("storage.mmap.prefetch-distance", 8);
                 int prefetchBatchSize = config.getInt("storage.mmap.prefetch-batch-size", 32);
                 long maxMemoryUsage = config.getLong("storage.mmap.max-memory-usage", 256) * 1024 * 1024; // MB to bytes
                 
                 boolean predictive = config.getBoolean("storage.mmap.predictive-enabled", true);
-                int predictionScale = config.getInt("storage.mmap.prediction-scale", 6);
+                int predictionScale = config.getInt("storage.mmap.prediction-scale", 12);
                 
-                return new MMapReadAheadEngine(path, maxCacheSize, prefetchDistance, 
-                                             prefetchBatchSize, maxMemoryUsage, predictive, predictionScale);
+                return new MMapReadAheadEngine(resource, maxCacheSize, prefetchDistance, 
+                                             prefetchBatchSize, maxMemoryUsage, predictive, predictionScale,
+                                             globalDecompressionExecutor);
             } catch (IOException e) {
                 System.err.println("[TurboMC][Storage] Failed to create MMap engine for " + path + ": " + e.getMessage());
+                return null;
+            }
+        });
+    }
+    
+    /**
+     * Get or create a region reader for the specified region.
+     */
+    private LRFRegionReader getRegionReader(Path regionPath) {
+        Path finalPath = normalizePath(regionPath);
+        return regionReaders.computeIfAbsent(finalPath, path -> {
+            try {
+                SharedRegionResource resource = getSharedResource(path);
+                return new LRFRegionReader(resource);
+            } catch (IOException e) {
+                System.err.println("[TurboMC][Storage] Failed to create region reader for " + path + ": " + e.getMessage());
                 return null;
             }
         });
@@ -462,7 +513,8 @@ public class TurboStorageManager implements AutoCloseable {
     private ChunkIntegrityValidator getIntegrityValidator(Path regionPath) {
         if (!integrityEnabled) return null;
         
-        return integrityValidators.computeIfAbsent(regionPath, path -> {
+        Path finalPath = normalizePath(regionPath);
+        return integrityValidators.computeIfAbsent(finalPath, path -> {
             String primaryAlgorithmName = config.getString("storage.integrity.primary-algorithm", "crc32c");
             String backupAlgorithmName = config.getString("storage.integrity.backup-algorithm", "sha256");
             boolean autoRepair = config.getBoolean("storage.integrity.auto-repair", true);
@@ -546,6 +598,7 @@ public class TurboStorageManager implements AutoCloseable {
      */
     public void closeRegion(Path regionPath) {
         try {
+            regionPath = normalizePath(regionPath);
             ChunkBatchLoader loader = batchLoaders.remove(regionPath);
             if (loader != null) {
                 loader.close();
@@ -561,15 +614,50 @@ public class TurboStorageManager implements AutoCloseable {
                 mmapEngine.close();
             }
             
+            LRFRegionReader reader = regionReaders.remove(regionPath);
+            if (reader != null) {
+                reader.close();
+            }
+            
             ChunkIntegrityValidator validator = integrityValidators.remove(regionPath);
             if (validator != null) {
                 validator.close();
+            }
+            
+            SharedRegionResource resource = sharedResources.remove(regionPath);
+            if (resource != null) {
+                resource.close();
             }
             
             System.out.println("[TurboMC][Storage] Closed storage components for: " + regionPath.getFileName());
         } catch (IOException e) {
             System.err.println("[TurboMC][Storage] Error closing region " + regionPath + ": " + e.getMessage());
         }
+    }
+    
+    /**
+     * Get or create a shared resource for a region.
+     */
+    private SharedRegionResource getSharedResource(Path regionPath) throws IOException {
+        Path finalPath = normalizePath(regionPath);
+        SharedRegionResource resource = sharedResources.get(finalPath);
+        if (resource == null) {
+            resource = new SharedRegionResource(finalPath);
+            SharedRegionResource existing = sharedResources.putIfAbsent(finalPath, resource);
+            if (existing != null) {
+                resource.close(); // Not needed
+                resource = existing;
+            }
+        }
+        return resource;
+    }
+    
+    /**
+     * Normalize path for map keys.
+     */
+    private Path normalizePath(Path path) {
+        if (path == null) return null;
+        return path.toAbsolutePath().normalize();
     }
     
     @Override
@@ -610,10 +698,19 @@ public class TurboStorageManager implements AutoCloseable {
                 }
             }
             
+            for (LRFRegionReader reader : regionReaders.values()) {
+                try {
+                    reader.close();
+                } catch (Exception e) {
+                    System.err.println("[TurboMC][Storage] Error closing region reader: " + e.getMessage());
+                }
+            }
+            
             // Clear collections
             batchLoaders.clear();
             batchSavers.clear();
             readAheadEngines.clear();
+            regionReaders.clear();
             integrityValidators.clear();
             
             // Shut down global executors

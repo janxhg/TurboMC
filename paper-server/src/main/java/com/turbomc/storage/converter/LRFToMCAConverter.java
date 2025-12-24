@@ -4,6 +4,7 @@ import com.turbomc.storage.lrf.LRFConstants;
 import com.turbomc.storage.lrf.LRFChunkEntry;
 import com.turbomc.storage.lrf.LRFRegionReader;
 import com.turbomc.storage.optimization.AnvilRegionWriter;
+import com.turbomc.storage.optimization.SharedRegionResource;
 
 import java.io.IOException;
 import java.nio.file.Files;

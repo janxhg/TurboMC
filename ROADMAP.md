@@ -19,8 +19,8 @@
 ---
 
 ## 📅 Version Status
-**Current Stable:** v1.8.0 (Zero-Failure Stability)
-**Next Milestone:** v1.9.0 (Profiling & Tools)
+**Current Stable:** v2.0.0 (The Speed Update)
+**Next Milestone:** v2.1.0 (Advanced Profiling & Hybrid Cache)
 
 ---
 
@@ -78,17 +78,18 @@ byte[] decompressed = TurboCompressionService.decompress(compressed);
 - [x] Auto-migración opcional al inicio del servidor ✅ v1.3.0 (configuración agregada)
 - [x] Progress tracking y logging ✅ v1.3.0
 
-**Estructura LRF:**
+**Estructura LRF v2:**
 ```
-Header (256 bytes)
+Header (8192 bytes)
+├─ Fast Magic: "TURBO_LRF" (9 bytes)
 ├─ Version (4 bytes)
 ├─ Chunk count (4 bytes)
 ├─ Compression type (4 bytes)
-└─ Offsets table (244 bytes)
+└─ Offsets table (4096 bytes)
 
-Chunks (sequential, no padding)
-├─ Chunk 0 (LZ4 compressed)
-├─ Chunk 1 (LZ4 compressed)
+Chunks (256-byte aligned)
+├─ 5-byte Length Header
+├─ Payload (LZ4/ZSTD)
 └─ ...
 ```
 
@@ -179,8 +180,9 @@ byte[] compressed = data.compress();
 - [x] `ChunkBatchLoader` - Carga múltiples chunks en paralelo ✅ v1.4.0
 - [x] `ChunkBatchSaver` - Escritura por lotes ✅ v1.4.0
 - [x] mmap read-ahead engine para SSD/NVMe ✅ v1.4.0
+- [x] **Predictive Loading v2**: Lookahead dinámico (48 chunks) + Vector Bias ✅ v2.0.0
 - [x] Validación de integridad (checksums) ✅ v1.4.0
-- [x] **Stability Fixes**: Alignment, Cache Thrashing, IO Blocking ✅ v1.5.0
+- [x] **Stability Fixes**: Alignment, TNBT Transcoding, Scalable Threading ✅ v2.0.0
 
 
 ---
@@ -304,10 +306,10 @@ L3: ChunkColdStorage (LRF/Disco)
 - [ ] Redstone → async executor
 
 ### 9. Batch Chunk I/O
-- [ ] `readChunksBulk(int x, int z, int radius)`
-- [ ] `writeChunksBulk(Collection<Chunk>)`
-- [ ] Prefetching en background basado en dirección del jugador
-- [ ] NVMe-optimized sequential reads
+- [x] `readChunksBulk(int x, int z, int radius)` ✅ v1.4.0
+- [x] `writeChunksBulk(Collection<Chunk>)` ✅ v1.4.0
+- [x] Prefetching proactivo basado en dirección del jugador ✅ v2.0.0
+- [x] NVMe-optimized sequential reads (direct mmap) ✅ v1.4.0
 
 ---
 
@@ -588,5 +590,5 @@ mode: turbo  # or 'vanilla'
 
 ---
 
-**Última actualización:** 2025-12-14
-**Versión del documento:** 1.5.0
+**Última actualización:** 2025-12-24
+**Versión del documento:** 2.0.0

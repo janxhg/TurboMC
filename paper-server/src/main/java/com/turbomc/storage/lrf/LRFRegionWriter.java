@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import com.turbomc.storage.optimization.SharedRegionResource;
 
 /**
  * Writes LRF (Linear Region Format) files.
@@ -23,6 +24,7 @@ public class LRFRegionWriter implements AutoCloseable {
     private final Path filePath;
     private final RandomAccessFile file;
     private final FileChannel channel;
+    private final SharedRegionResource sharedResource;
     private final int compressionType;
     private final List<LRFChunkEntry> chunks;
     private boolean headerWritten;
@@ -37,6 +39,16 @@ public class LRFRegionWriter implements AutoCloseable {
     private boolean streamingMode;
     private LRFHeader streamingHeader;
     
+    private static boolean verbose = false;
+
+    public static void setVerbose(boolean value) {
+        verbose = value;
+    }
+
+    public static boolean isVerbose() {
+        return verbose;
+    }
+
     /**
      * Create a new LRF file for writing.
      * 
@@ -48,13 +60,50 @@ public class LRFRegionWriter implements AutoCloseable {
         this.filePath = filePath;
         this.file = new RandomAccessFile(filePath.toFile(), "rw");
         this.channel = file.getChannel();
+        this.sharedResource = null;
         this.compressionType = compressionType;
         this.chunks = new ArrayList<>();
         this.headerWritten = false;
         
+        // Final field initialization
+        this.writeBuffer = ByteBuffer.allocate(LRFConstants.STREAM_BUFFER_SIZE);
+        this.bytesWritten = new AtomicLong(0);
+        this.chunksCompressed = new AtomicLong(0);
+        this.compressionTime = new AtomicLong(0);
+        
+        initializeWriter();
+    }
+    
+    /**
+     * Create writer using a shared resource.
+     */
+    public LRFRegionWriter(SharedRegionResource resource, int compressionType) throws IOException {
+        this.filePath = resource.getPath();
+        this.file = null; 
+        this.channel = resource.getChannel();
+        this.sharedResource = resource;
+        this.compressionType = compressionType;
+        this.chunks = new ArrayList<>();
+        this.headerWritten = false;
+        
+        // Final field initialization
+        this.writeBuffer = ByteBuffer.allocate(LRFConstants.STREAM_BUFFER_SIZE);
+        this.bytesWritten = new AtomicLong(0);
+        this.chunksCompressed = new AtomicLong(0);
+        this.compressionTime = new AtomicLong(0);
+        
+        resource.acquire();
+        initializeWriter();
+    }
+    
+    private void initializeWriter() throws IOException {
         // Initialize header
-        if (file.length() < LRFConstants.HEADER_SIZE) {
-            file.setLength(LRFConstants.HEADER_SIZE);
+        if (channel.size() < LRFConstants.HEADER_SIZE) {
+            if (file != null) {
+                file.setLength(LRFConstants.HEADER_SIZE);
+            } else {
+                channel.truncate(LRFConstants.HEADER_SIZE);
+            }
             this.streamingHeader = new LRFHeader(LRFConstants.FORMAT_VERSION, 0, compressionType);
         } else {
             // Load existing header to avoid overwriting
@@ -63,19 +112,23 @@ public class LRFRegionWriter implements AutoCloseable {
             headerBuffer.flip();
             this.streamingHeader = LRFHeader.read(headerBuffer);
             
-            // SET POSITION TO END FOR APPEND
-            channel.position(channel.size());
+            // SET POSITION TO END FOR APPEND (Aligned to 256 bytes)
+            long size = channel.size();
+            long alignedSize = (size % 256 == 0) ? size : (size / 256 + 1) * 256;
+            if (alignedSize > size) {
+                channel.position(size);
+                channel.write(ByteBuffer.allocate((int)(alignedSize - size)));
+            }
+            channel.position(alignedSize);
         }
 
         // Initialize performance components
-        this.writeBuffer = ByteBuffer.allocate(LRFConstants.STREAM_BUFFER_SIZE);
-        this.bytesWritten = new AtomicLong(0);
-        this.chunksCompressed = new AtomicLong(0);
-        this.compressionTime = new AtomicLong(0);
         this.streamingMode = true; // Default to streaming for updates
         
-        System.out.println("[TurboMC] Opened LRF region for update: " + filePath.getFileName() + 
-                         " (size: " + file.length() + ")");
+        if (verbose) {
+            System.out.println("[TurboMC] Opened LRF region for update: " + filePath.getFileName() + 
+                             " (size: " + channel.size() + ")" + (sharedResource != null ? " [SHARED]" : ""));
+        }
     }
     
     /**
@@ -99,7 +152,9 @@ public class LRFRegionWriter implements AutoCloseable {
             LRFConstants.FORMAT_VERSION, 0, compressionType
         );
         
-        System.out.println("[TurboMC] Enabled streaming mode for " + filePath.getFileName());
+        if (verbose) {
+            System.out.println("[TurboMC] Enabled streaming mode for " + filePath.getFileName());
+        }
     }
     
     /**
@@ -207,6 +262,9 @@ public class LRFRegionWriter implements AutoCloseable {
         // Update statistics
         chunksCompressed.incrementAndGet();
         compressionTime.addAndGet(System.nanoTime() - startTime);
+        
+        // Reset headerWritten flag when adding new data after a flush
+        headerWritten = false;
     }
     
     /**
@@ -237,22 +295,27 @@ public class LRFRegionWriter implements AutoCloseable {
      * 
      * @throws IOException if write fails
      */
-    public void flush() throws IOException {
-        if (headerWritten) {
-            return; // Already flushed
+    public synchronized void flush() throws IOException {
+        flush(true);
+    }
+
+    public synchronized void flush(boolean force) throws IOException {
+        if (headerWritten && !streamingMode) {
+            return; // Already flushed batch
         }
         
         if (streamingMode) {
-            flushStreaming();
+            flushStreaming(force);
         } else {
             flushBatch();
+            if (force) channel.force(true);
         }
     }
     
     /**
      * Flush streaming mode - write header with final offsets.
      */
-    private void flushStreaming() throws IOException {
+    private synchronized void flushStreaming(boolean force) throws IOException {
         LRFHeader finalHeader = new LRFHeader(
             LRFConstants.FORMAT_VERSION,
             streamingHeader.countChunks(),
@@ -268,18 +331,22 @@ public class LRFRegionWriter implements AutoCloseable {
         channel.write(headerBuffer, 0);
         
         // CRITICAL: Force sync to disk to prevent corruption
-        channel.force(true);
+        if (force) {
+            channel.force(true);
+        }
         
         headerWritten = true;
         
-        System.out.println("[TurboMC] Streaming flush: " + chunksCompressed.get() + 
-                         " chunks to " + filePath.getFileName());
+        if (verbose) {
+            System.out.println("[TurboMC] Streaming flush: " + chunksCompressed.get() + 
+                             " chunks to " + filePath.getFileName() + " (force=" + force + ")");
+        }
     }
     
     /**
      * Flush batch mode - write all buffered chunks.
      */
-    private void flushBatch() throws IOException {
+    private synchronized void flushBatch() throws IOException {
         // Create header
         LRFHeader header = new LRFHeader(
             LRFConstants.FORMAT_VERSION,
@@ -317,10 +384,11 @@ public class LRFRegionWriter implements AutoCloseable {
                 channel.position(currentOffset);
             }
             
-            // Write length header (4 bytes)
-            int totalLength = 4 + compressedData.length;
-            ByteBuffer lengthBuffer = ByteBuffer.allocate(4);
+            // Write length header (5 bytes) - Total length = 4 + 1 + compressedData.length
+            int totalLength = 4 + 1 + compressedData.length;
+            ByteBuffer lengthBuffer = ByteBuffer.allocate(5);
             lengthBuffer.putInt(totalLength);
+            lengthBuffer.put((byte)compressionType);
             lengthBuffer.flip();
             channel.write(lengthBuffer);
             
@@ -413,11 +481,15 @@ public class LRFRegionWriter implements AutoCloseable {
                 flush();
             }
         } finally {
-            if (channel != null && channel.isOpen()) {
-                channel.close();
-            }
-            if (file != null) {
-                file.close();
+            if (sharedResource != null) {
+                sharedResource.close();
+            } else {
+                if (channel != null && channel.isOpen()) {
+                    channel.close();
+                }
+                if (file != null) {
+                    file.close();
+                }
             }
         }
     }
