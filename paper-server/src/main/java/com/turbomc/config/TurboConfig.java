@@ -90,6 +90,28 @@ public class TurboConfig {
     public static TurboConfig get() {
         return getInstance();
     }
+
+    // ============ CHUNK MEMORY OPTIMIZATION (v2.3.3) ============
+    
+    public boolean isCompactPaletteEnabled() {
+        return getBoolean("chunk.optimization.compact-palette", true);
+    }
+    
+    public boolean isPruneSectionsEnabled() {
+        return getBoolean("chunk.optimization.prune-empty-sections", true);
+    }
+    
+    public boolean isNBTOptimizationEnabled() {
+        return getBoolean("chunk.optimization.optimize-nbt", true);
+    }
+    
+    public boolean isBlockStatePoolEnabled() {
+        return getBoolean("chunk.optimization.block-state-pool", false); // Experimental
+    }
+    
+    public boolean isChunkOptimizationVerbose() {
+        return getBoolean("chunk.optimization.verbose", false);
+    }
     
     public static boolean isInitialized() {
         return instance != null;
