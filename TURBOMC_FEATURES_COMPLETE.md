@@ -1,7 +1,7 @@
 """
 ===============================================================================
 TURBOMC - CARACTERÍSTICAS COMPLETAS IMPLEMENTADAS
-Versión 2.3.0 | Java 21+ | PaperMC Fork Optimizado
+Versión 2.3.1 | Java 21+ | PaperMC Fork Optimizado
 ===============================================================================
 
 # SISTEMA DE ALMACENAMIENTO LRF (LINEAR REGION FORMAT)
@@ -15,9 +15,9 @@ Versión 2.3.0 | Java 21+ | PaperMC Fork Optimizado
 - LRFRegionFileAdapter: Adaptador de compatibilidad con TNBT-to-NBT Transcoding (v2.0)
 
 ## Optimizadores de Almacenamiento
-- MMapReadAheadEngine: Predictive Streaming Engine con Intent Detection [ENHANCED v2.3.0]
-  - Lookahead dinámico (hasta 64 chunks) basado en intención.
-  - Probability Tunnels: Prefetching de área basado en varianza de movimiento.
+- MMapReadAheadEngine: Predictive Streaming Engine con Intent Detection [ENHANCED v2.3.1]
+  - Deep Prefetching: Radio extendido a **32 chunks** (3x view distance).
+  - Parallel LOD Integration: Coordinación con el sistema de niveles de detalle para pre-carga ultra-liviana.
   - Windows Compatibility Mode: Unsafe buffer de-mapping para evitar file locks.
   - totalPrefetchCount: Seguimiento preciso de métricas de carga asíncrona.
 - IntentPredictor: IA de detección de intención de movimiento (Historial 3s) [NEW v2.3.0]
@@ -72,12 +72,13 @@ Versión 2.3.0 | Java 21+ | PaperMC Fork Optimizado
   - Particle effect optimization
   - Quality scaling basado en performance
 
-## Optimización de Chunks
-- TurboChunkLoadingOptimizer: Optimizador de carga de chunks
-  - Carga paralela de chunks
-  - Priorización basada en jugadores
-  - Preloading inteligente
-  - Cache management
+## 4-Tier Parallel LOD system (v2.3.1) [NEW]
+- **LOD_0 (FULL)**: 0-8 chunks. Procesamiento completo de NBT y entidades.
+- **LOD_1 (Sleep)**: 9-16 chunks. Skip de entity ticking (`inactiveTick`) para ahorro masivo de CPU.
+- **LOD_2 (Virtual)**: 17-32 chunks. Skinny `LevelChunk` servido en el "Parallel Fast Path". Bypasses Disk I/O y NBT.
+- **LOD_3 (Predictive)**: 33+ chunks. Marcadores livianos para pre-calentar el mapeo de memoria sin ocupar RAM significativa.
+- **Asynchronous Extraction**: Captura de LOD data durante ciclos de guardado en background (`SerializableChunkData`).
+- **Parallel-Safe Interception**: Hook asíncrono en `ChunkLoadTask` para servir tiers virtuales sin bloquear el hilo principal.
 
 # SISTEMA DE VOXEL Y ESTRUCTURAS (NUEVO v2.0)
 

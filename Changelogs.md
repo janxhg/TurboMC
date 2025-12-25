@@ -2,6 +2,15 @@
 
 Fork avanzado de PaperMC con foco en **storage moderno**, **SIMD**, y **baja latencia**.
 
+## 🚀 v2.3.1 — The Parallel LOD & Deep Preloading Update (Latest)
+- **4-Tier Parallel LOD Hierarchy**: Dynamic chunk classification based on distance:
+    - **LOD 1 (Sleep)**: Entities stop ticking (inactiveTick) for mid-range chunks (9-16).
+    - **LOD 2 (Virtual)**: Server-side virtualization for distant chunks (17-32), serving terrain without Disk I/O or NBT.
+    - **LOD 3 (Predictive)**: Marker-only pre-warming for ultra-distant chunks (33+).
+- **Deep 32-Chunk Preloading**: Doubled the prefetch radius in `MMapReadAheadEngine`, dramatically improving high-speed travel stability.
+- **Parallel-Safe Fast Path**: Asynchronous interception in `ChunkLoadTask` to serve virtualized chunks on the main thread without blocking.
+- **Asynchronous Extraction**: Transitioned LOD data extraction to the background chunk-saving pipeline (`SerializableChunkData`).
+
 ---
 
 ## 🚀 v2.3.0 — The True Predictive Update (Stable)

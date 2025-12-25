@@ -91,15 +91,16 @@ public class MMapReadAheadEngine implements AutoCloseable {
     
     // Intent-based Prediction
     private final com.turbomc.streaming.IntentPredictor intentPredictor;
+    private final com.turbomc.storage.lod.LODManager lodManager; // TurboMC - LOD Manager
 
     
 
     public MMapReadAheadEngine(SharedRegionResource resource) throws IOException {
         this(resource, 
-             512,  // max cache size (chunks)
-             8,    // prefetch distance (chunks)
-             32,   // prefetch batch size
-             256 * 1024 * 1024, // 256MB max memory
+             1024, // max cache size (chunks)
+             32,   // prefetch distance (chunks)
+             64,   // prefetch batch size
+             512 * 1024 * 1024, // 512MB max memory
              true, // predictive enabled
              12);   // prediction scale (increased for speed 10)
     }
@@ -137,6 +138,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
         this.predictiveEnabled = predictiveEnabled;
         this.predictionScale = predictionScale;
         this.useForeignMemoryAPI = detectForeignMemoryAPI();
+        this.lodManager = com.turbomc.storage.lod.LODManager.getInstance(); // TurboMC
         
         if (prefetchExecutor != null) {
             this.prefetchExecutor = prefetchExecutor;
@@ -544,11 +546,22 @@ public class MMapReadAheadEngine implements AutoCloseable {
                      continue; 
                 }
                 
+                int targetX = coords[0];
+                int targetZ = coords[1];
+
+                // TurboMC - Virtualization check
+                boolean virtualized = lodManager.shouldVirtualizedPrefetch(centerX, centerZ, targetX, targetZ);
+                
                 try {
-                    byte[] data = readChunkDirect(coords[0], coords[1]);
-                    if (data != null) {
-                        int chunkIndex = LRFConstants.getChunkIndex(coords[0] & 31, coords[1] & 31);
-                        cacheChunk(chunkIndex, data, true);
+                    if (virtualized) {
+                        // Virtual prefetch (LOD 0) - Just warm the mapping
+                        readChunkDirect(targetX, targetZ);
+                    } else {
+                        byte[] data = readChunkDirect(targetX, targetZ);
+                        if (data != null) {
+                            int chunkIndex = LRFConstants.getChunkIndex(targetX & 31, targetZ & 31);
+                            cacheChunk(chunkIndex, data, true);
+                        }
                     }
                 } catch (IOException e) {
                     // Ignore prefetch errors

@@ -33,9 +33,12 @@
 # chunk.caching.enabled - Real (HybridChunkCache)
 # chunk.priority-loading.enabled - Real (TurboChunkLoadingOptimizer)
 
-# NUEVAS IMPLEMENTACIONES (v2.0.0):
+# NUEVAS IMPLEMENTACIONES (v2.3.1):
+# - 4-Tier Parallel LOD System: FULL, Sleep, Virtual, Predictive tiers
+# - Deep Prefetching: Radio extendido a 32 chunks para exploración extrema
+# - Parallel Fast Path: Carga de chunks asíncrona sin bloqueos en main thread
 # - Optimized Voxel Format (OVF): Sistema de carga ultra-rápida de estructuras
-# - MMap Predictive Engine v2: Prefetching extendido (12 chunks) para alta velocidad
+# - MMap Predictive Engine v2.3: Intent Prediction & Probability Tunnels
 # - NVMe Direct I/O: Bypass de caché L1 para máximo throughput en SSDs modernos
 # - TurboRedstoneOptimizer: Optimización completa de redstone
 # - TurboHopperOptimizer: Optimización de hopper performance
@@ -48,8 +51,9 @@
 # - 100% de configuraciones TOML ahora son funcionales
 # - Seccion FPS completamente implementada con configuración completa
 # - Quality completamente implementada con auto-ajuste funcional
-# - Storage y Chunk estan perfectamente implementados (v2.0 Ready)
+# - Storage y Chunk estan perfectamente implementados (v2.3.1)
+# - Parallel LOD System + Deep Preloading implementado satisfactoriamente
 # - OVF Sistema de voxels ultra-rápido implementado
 # - Sistema modular con TurboOptimizerModule para extensibilidad
 # - Todos los optimizadores específicos ahora implementados
-# - TurboMC v2.0.0 "The Speed Update" - COMPLETADO
+# - TurboMC v2.3.1 "The Parallel LOD Update" - COMPLETADO

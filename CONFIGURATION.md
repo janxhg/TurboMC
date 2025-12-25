@@ -90,12 +90,23 @@ prefetch-batch-size = 32
 predictive-enabled = true
 
 # Prediction strength (how many chunks ahead to look)
-# Recommended: 12 (Base). At high speeds (flyspeed 10), TurboMC scales this automatically up to 4x (48 chunks).
-prediction-scale = 12
+# Recommended: 32 (v2.3.1). TurboMC scales this automatically up to 64.
+prediction-scale = 32
 
 # Maximum memory usage in MB
-max-memory-usage = 256
+max-memory-usage = 512
 ```
+
+### 🧵 Parallel LOD Architecture (v2.3.1) [NUEVO]
+
+El sistema de **Level of Detail (LOD)** de TurboMC v2.3.1 es automático y funciona en hilos paralelos para maximizar el pre-warming sin impacto en el main thread.
+
+| Nivel | Rango (Chunks) | Impacto Teórico |
+| :--- | :--- | :--- |
+| **FULL** | 0 - 8 | Carga completa de NBT y Entidades. |
+| **LOD 1 (Sleep)** | 9 - 16 | Entities cargadas pero "dormidas" (`inactiveTick`). |
+| **LOD 2 (Virtual)** | 17 - 32 | Chunks virtuales (terreno base) servidos asíncronamente. |
+| **LOD 3 (Predictive)**| 33 - 64 | Marcadores de pre-carga para I/O latency reduction. |
 
 ### OVF (Optimized Voxel Format) Configuration [NEW v2.0]
 
@@ -341,5 +352,5 @@ Use `/turbo monitor` command to see:
 
 ---
 
-**Last Updated**: 2025-12-24
-**Version**: 2.2.0 (The Command & Stress Update)
+**Last Updated**: 2025-12-25
+**Version**: 2.3.1 (The Parallel LOD Update)

@@ -19,7 +19,7 @@
 ---
 
 ## 📅 Version Status
-**Current Stable:** v2.3.0 (The True Predictive Update)
+**Current Stable:** v2.3.1 (The Parallel LOD Update)
 **Next Milestone:** v2.4.0 (Parallel Gen & Advanced SIMD)
 
 ---
@@ -182,6 +182,7 @@ byte[] compressed = data.compress();
 - [x] mmap read-ahead engine para SSD/NVMe ✅ v1.4.0
 - [x] **Predictive Loading v2**: Lookahead dinámico (48 chunks) + Vector Bias ✅ v2.0.0
 - [x] **Predictive Streaming Engine v2.3**: Intent Prediction, Probability Tunnels, Elytra/Trident support ✅ v2.3.0
+- [x] **Parallel LOD System v2.3.1**: 4-Tier Hierarchy (Sleep, Virtual, Predictive), Main-Thread Serving Interface ✅ v2.3.1
 - [x] Validación de integridad (checksums) ✅ v1.4.0
 - [x] **Stability Fixes**: Alignment, TNBT Transcoding, Scalable Threading ✅ v2.0.0
 
@@ -591,5 +592,5 @@ mode: turbo  # or 'vanilla'
 
 ---
 
-**Última actualización:** 2025-12-24
-**Versión del documento:** 2.3.0
+**Última actualización:** 2025-12-25
+**Versión del documento:** 2.3.1

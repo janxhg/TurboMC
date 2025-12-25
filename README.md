@@ -1,6 +1,6 @@
 # TurboMC 🚀
 
-**Versión 2.3.0 (The True Predictive Update)**  
+**Versión 2.3.1 (The Parallel LOD Update)**  
 Fork avanzado de **PaperMC 1.21.10** optimizado para **velocidad extrema**, **almacenamiento moderno** y **servidores de última generación**.
 
 [Changelog](./versions.md) · [Features](./TURBOMC_FEATURES_COMPLETE.md) · [Benchmarks](./CACHE_BENCHMARKS.md)
@@ -38,10 +38,10 @@ TurboMC redefine el rendimiento en Minecraft. Reemplaza el almacenamiento MCA po
  ---
 
 ## ⚡ Rendimiento de Próxima Generación
+- **4-Tier Parallel LOD System (v2.3.1)**: Jerarquía dinámica que permite pre-cargar hasta **64 chunks** con costo CPU/IO cercano a cero para el 75% del radio.
 - **SIMD Collision Engine**: Vector API para físicas paralelas.
-- **Extreme Pre-fetching Engine**: Lookahead de hasta 800 bloques en la dirección de viaje.
-- **Scalable I/O Pipeline**: Arquitectura de hilos global con hasta 32 workers de descompresión.
-- **Batch I/O v2**: Procesamiento asíncrono optimizado para Folia/Moonrise.
+- **Deep Prefetching Engine**: Lookahead coordinado de hasta 512 bloques.
+- **Parallel-Safe Fast Path**: Carga de chunks asíncrona optimizada para Moonrise.
 
 ---
 

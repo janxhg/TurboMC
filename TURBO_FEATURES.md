@@ -1,4 +1,4 @@
-# TurboMC v2.0.0 — The Speed Update
+# TurboMC v2.3.1 — The Parallel LOD Update
 
 ## 🚀 Overview
 TurboMC es un fork avanzado de PaperMC enfocado en **velocidad extrema**, **almacenamiento moderno** e **integridad de datos**, diseñado para servidores que no pueden permitirse ni un milisegundo de retraso.
@@ -22,9 +22,19 @@ El motor de almacenamiento LRF ha evolucionado en la v2.3 a un sistema de **Stre
 
 - **Intent Prediction Engine (v2.3):** A diferencia de modelos simples de velocidad, TurboMC ahora analiza el historial de movimiento (últimos 3 segundos) para deducir la "intención" del jugador.
 - **Probability Tunnels:** Genera un túnel de carga probabilístico en lugar de un vector lineal, cubriendo cambios de dirección detectados en tiempo real.
-- **Elytra & Trident Multipliers:** Multiplica dinámicamente el lookahead al detectar vuelos de alta velocidad, permitiendo una carga fluida de hasta **64 chunks** de distancia.
-- **Windows File Lock Fix:** Implementación de desmapeo explícito de memoria (Unsafe Buffer Cleanup) que permite operar en sistemas Windows sin bloqueos de archivos `.lrf`.
-- **Parallel Chunk Pipeline:** Optimización de hilos que permite la carga paralela masiva distribuida entre múltiples regiones de forma asíncrona.
+- **ELYTRA & TRIDENT MULTIPLIERS:** Multiplica dinámicamente el lookahead al detectar vuelos de alta velocidad, permitiendo una carga fluida de hasta **64 chunks** de distancia.
+- **PARALLEL CHUNK PIPELINE:** Optimización de hilos que permite la carga paralela masiva distribuida entre múltiples regiones de forma asíncrona.
+
+## 🧵 4-Tier Parallel LOD (v2.3.1) [NUEVO]
+**Estado:** Implementado & Validado
+**Clases:** `LODManager`, `LevelChunk`, `ChunkLoadTask`
+
+Sistema jerárquico de niveles de detalle que permite un pre-warming agresivo del mapa sin costo de memoria o CPU.
+
+- **LOD 1 (Sleep Mode):** Desactiva el ticking de entidades en el rango medio (9-16 chunks) ahorrando ~40% de CPU.
+- **LOD 2 (Virtualization):** Sirve chunks virtuales con topografía básica para el rango lejano (17-32 chunks) sin tocar el disco.
+- **LOD 3 (Predictive):** Marcadores ultra-livianos para el rango extremo (33-64 chunks) que eliminan el lag de búsqueda en disco (I/O latency).
+- **Parallel Fast Path:** Intercepción asíncrona en el pipeline de Moonrise para servir datos virtuales sin bloquear el hilo principal.
 
 ## 💾 Advanced Converters & Integration...
 
