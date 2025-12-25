@@ -47,6 +47,7 @@ public class TurboRegionFileStorage extends RegionFileStorage {
     private final boolean verbose;
     private final boolean useTurboFeatures;
     private final Set<Long> recompressedChunks = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private static final java.util.concurrent.atomic.AtomicInteger globalLrfWriteCount = new java.util.concurrent.atomic.AtomicInteger(0);
     
     public TurboRegionFileStorage(RegionStorageInfo info, Path folder, boolean sync) {
         super(info, folder, sync); // Call parent constructor
@@ -242,6 +243,13 @@ public class TurboRegionFileStorage extends RegionFileStorage {
             // OPTIMIZATION: Use PackedBinaryNBT for LRF storage instead of standard NBT
             // This is significantly faster and smaller for chunk data
             byte[] dataToWrite = com.turbomc.nbt.NBTConverter.toPackedBinary(nbt).toBytes();
+            
+            // LOD 4 Integration: Update Global World Index
+            String worldName = regionFolder.getParent().getFileName().toString();
+            if (worldName.equals("DIM-1") || worldName.equals("DIM1")) {
+                worldName = regionFolder.getParent().getParent().getFileName().toString();
+            }
+            com.turbomc.storage.lod.LODManager.getInstance().extractLOD4(worldName, pos.x, pos.z, nbt);
             
             // Hand off to Storage Manager (NON-BLOCKING)
             // We do NOT call future.get() here. The Storage Manager handles the write in its own pool.
@@ -757,11 +765,32 @@ public class TurboRegionFileStorage extends RegionFileStorage {
         Path regionPath = regionFolder.resolve(String.format("r.%d.%d.lrf", chunkX >> 5, chunkZ >> 5));
         
         if (writeData.input() != null) {
-            byte[] data = com.turbomc.nbt.NBTConverter.toPackedBinary(writeData.input()).toBytes();
+            CompoundTag nbt = writeData.input();
+            byte[] data = com.turbomc.nbt.NBTConverter.toPackedBinary(nbt).toBytes();
+            
+            // LOD 4 Integration: Update Global World Index
+            String worldName = regionFolder.getParent().getFileName().toString();
+            if (worldName.equals("DIM-1") || worldName.equals("DIM1")) {
+                worldName = regionFolder.getParent().getParent().getFileName().toString();
+            }
+            com.turbomc.storage.lod.LODManager.getInstance().extractLOD4(worldName, chunkX, chunkZ, nbt);
+            
+            // Hijack to TurboStorageManager
             TurboStorageManager.getInstance().saveChunk(regionPath, chunkX, chunkZ, data);
             
-            if (verbose) {
-                System.out.println("[TurboMC][RegionStorage] Hijacked Moonrise finishWrite for LRF: " + pos);
+            // MCA Cleanup: If we are writing to LRF, remove the obsolete MCA file
+            try {
+                TurboConfig config = TurboConfig.getInstance();
+                if (!config.getBoolean("storage.backup-original-mca", false)) {
+                    Path mcaPath = regionFolder.resolve(String.format("r.%d.%d.mca", chunkX >> 5, chunkZ >> 5));
+                    if (java.nio.file.Files.exists(mcaPath)) {
+                        java.nio.file.Files.deleteIfExists(mcaPath);
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            if (verbose || globalLrfWriteCount.incrementAndGet() % 100 == 0) {
+                System.out.println("[TurboMC][RegionStorage] Direct IO -> LRF: " + pos + " | LOD 4 extracted | Total Writes: " + globalLrfWriteCount.get());
             }
             return;
         }

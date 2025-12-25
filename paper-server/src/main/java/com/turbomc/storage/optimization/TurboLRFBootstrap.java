@@ -259,6 +259,10 @@ public final class TurboLRFBootstrap {
             if (conversionMode.isAutomaticConversion()) {
                 config.migrateWorldRegionsIfNeeded(worldDirectory);
             }
+            
+            // LOD 4 Integration: Initialize World Index
+            String worldName = worldDirectory.getFileName().toString();
+            TurboStorageManager.getInstance().initWorld(worldName, worldDirectory);
         } catch (Exception e) {
             System.err.println("[TurboMC][LRF] Failed to migrate world: " + e.getMessage());
             e.printStackTrace();

@@ -57,6 +57,9 @@ public class MMapReadAheadEngine implements AutoCloseable {
     private final boolean predictiveEnabled;
     private final int predictionScale;
     private boolean useForeignMemoryAPI;
+    private final int regionX;
+    private final int regionZ;
+    private final AtomicLong lastUltraScan = new AtomicLong(0);
 
     // Memory management
     private final AtomicLong currentMemoryUsage;
@@ -139,6 +142,21 @@ public class MMapReadAheadEngine implements AutoCloseable {
         this.predictionScale = predictionScale;
         this.useForeignMemoryAPI = detectForeignMemoryAPI();
         this.lodManager = com.turbomc.storage.lod.LODManager.getInstance(); // TurboMC
+        
+        // Extract region coordinates from path (e.g., r.0.0.lrf or r.0.0.mca)
+        String fileName = regionPath.getFileName().toString();
+        int rx = 0, rz = 0;
+        try {
+            String[] parts = fileName.split("\\.");
+            if (parts.length >= 3) {
+                rx = Integer.parseInt(parts[1]);
+                rz = Integer.parseInt(parts[2]);
+            }
+        } catch (Exception e) {
+            // Fallback
+        }
+        this.regionX = rx;
+        this.regionZ = rz;
         
         if (prefetchExecutor != null) {
             this.prefetchExecutor = prefetchExecutor;
@@ -554,13 +572,20 @@ public class MMapReadAheadEngine implements AutoCloseable {
                 
                 try {
                     if (virtualized) {
-                        // Virtual prefetch (LOD 0) - Just warm the mapping
+                        // Virtual prefetch (LOD 0/3/4) - Just warm the mapping
                         readChunkDirect(targetX, targetZ);
                     } else {
                         byte[] data = readChunkDirect(targetX, targetZ);
                         if (data != null) {
-                            int chunkIndex = LRFConstants.getChunkIndex(targetX & 31, targetZ & 31);
-                            cacheChunk(chunkIndex, data, true);
+                            // Speculative validation before caching (v2.4.1)
+                            com.turbomc.storage.optimization.TurboStorageManager.getInstance()
+                                .validateSpeculative(regionPath, targetX, targetZ, data)
+                                .thenAccept(report -> {
+                                    if (report.isValid()) {
+                                        int chunkIndex = LRFConstants.getChunkIndex(targetX & 31, targetZ & 31);
+                                        cacheChunk(chunkIndex, data, true);
+                                    }
+                                });
                         }
                     }
                 } catch (IOException e) {
@@ -568,6 +593,70 @@ public class MMapReadAheadEngine implements AutoCloseable {
                 } finally {
                     prefetchCount.decrementAndGet();
                 }
+            }
+        }, prefetchExecutor);
+
+        // 3. Ultra Pre-Chunking (v2.4.0)
+        if (lodManager.isUltraEnabled()) {
+            long now = System.currentTimeMillis();
+            if (now - lastUltraScan.get() > 60000) { // Scan at most once per minute
+                int playerChunkX = centerX;
+                int playerChunkZ = centerZ;
+                
+                // Approximate distance to region center (in chunks)
+                int myCenterX = (regionX << 5) + 16;
+                int myCenterZ = (regionZ << 5) + 16;
+                int dist = Math.max(Math.abs(playerChunkX - myCenterX), Math.abs(playerChunkZ - myCenterZ));
+                
+                if (dist <= lodManager.getUltraRadius() + 32) {
+                    lastUltraScan.set(now);
+                    runUltraScan();
+                }
+            }
+        }
+    }
+
+    /**
+     * Performs a background sweep of the entire region to pre-warm OS cache/LOD data.
+     */
+    private void runUltraScan() {
+        CompletableFuture.runAsync(() -> {
+            if (isClosed.get()) return;
+            
+            // Drip-feed the whole region (1024 chunks)
+            // We use a local list to avoid holding locks
+            List<int[]> allChunks = new ArrayList<>(1024);
+            for (int x = 0; x < 32; x++) {
+                for (int z = 0; z < 32; z++) {
+                    int chunkX = (regionX << 5) + x;
+                    int chunkZ = (regionZ << 5) + z;
+                    int chunkIndex = LRFConstants.getChunkIndex(x, z);
+                    
+                    if (!chunkCache.containsKey(chunkIndex)) {
+                        allChunks.add(new int[]{chunkX, chunkZ});
+                    }
+                }
+            }
+            
+            // Process in small sub-batches to avoid hogging the prefetch executor
+            for (int i = 0; i < allChunks.size(); i += 8) {
+                if (isClosed.get()) break;
+                
+                final int start = i;
+                final int end = Math.min(i + 8, allChunks.size());
+                
+                prefetchExecutor.execute(() -> {
+                    for (int j = start; j < end; j++) {
+                        int[] coords = allChunks.get(j);
+                        try {
+                            // Ultra pre-chunking is ALWAYS virtualized (LOD 3)
+                            readChunkDirect(coords[0], coords[1]);
+                        } catch (IOException ignored) {}
+                    }
+                });
+                
+                // Sleep slightly between sub-batches to stay low priority
+                try { Thread.sleep(50); } catch (InterruptedException ignored) {}
             }
         }, prefetchExecutor);
     }

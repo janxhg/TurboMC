@@ -14,10 +14,12 @@ public class LODManager {
     private final Map<Long, LODChunk> lodCache = new ConcurrentHashMap<>();
     private final TurboConfig config;
     
-    // Distance thresholds (in chunks)
-    private int lod1Threshold = 8; // Mid (Entities sleep)
-    private int lod2Threshold = 16; // Far (Virtualization)
-    private int lod3Threshold = 32; // Ultra-Far (Predictive Marker)
+    // Distance thresholds (in chunks) - Loaded from config
+    private int lod1Threshold;
+    private int lod2Threshold;
+    private int lod3Threshold;
+    private boolean ultraEnabled;
+    private int ultraRadius;
 
     private LODManager() {
         this.config = TurboConfig.getInstance();
@@ -29,8 +31,19 @@ public class LODManager {
     }
 
     public void updateThresholds() {
-        // Values from config when implemented there
-        // this.lod0Threshold = config.getLOD0Threshold();
+        this.lod1Threshold = config.getLOD1Distance();
+        this.lod2Threshold = config.getLOD2Distance();
+        this.lod3Threshold = config.getLOD3Distance();
+        this.ultraEnabled = config.isUltraPrechunkingEnabled();
+        this.ultraRadius = config.getUltraPrechunkingRadius();
+    }
+
+    public boolean isUltraEnabled() {
+        return ultraEnabled;
+    }
+
+    public int getUltraRadius() {
+        return ultraRadius;
     }
 
     public LODLevel getRequiredLevel(net.minecraft.server.level.ServerLevel world, int chunkX, int chunkZ) {
@@ -43,7 +56,12 @@ public class LODManager {
             minDist = Math.min(minDist, Math.max(dx, dz));
         }
         
-        if (minDist >= lod3Threshold) return LODLevel.LOD_3;
+        if (minDist >= lod3Threshold) {
+             // If ultra pre-chunking is enabled, we allow LOD 3 up to ultraRadius
+             if (ultraEnabled && minDist <= ultraRadius) return LODLevel.LOD_3;
+             // LOD 4 is for EVERYTHING beyond ultraRadius or if LOD 3 is exhausted
+             return LODLevel.LOD_4;
+        }
         if (minDist >= lod2Threshold) return LODLevel.LOD_2;
         if (minDist >= lod1Threshold) return LODLevel.LOD_1;
         return LODLevel.FULL;
@@ -57,7 +75,10 @@ public class LODManager {
         int dz = Math.abs(playerZ - chunkZ);
         int dist = Math.max(dx, dz);
 
-        if (dist >= lod3Threshold) return LODLevel.LOD_3;
+        if (dist >= lod3Threshold) {
+            if (ultraEnabled && dist <= ultraRadius) return LODLevel.LOD_3;
+            return LODLevel.LOD_4;
+        }
         if (dist >= lod2Threshold) return LODLevel.LOD_2;
         if (dist >= lod1Threshold) return LODLevel.LOD_1;
         return LODLevel.FULL;
@@ -85,39 +106,68 @@ public class LODManager {
     }
 
     public enum LODLevel {
-        FULL,  // 0-8 chunks
-        LOD_1, // 9-16 chunks (Entities sleep)
-        LOD_2, // 17-32 chunks (Virtualization - terrain only)
-        LOD_3  // 33-64 chunks (Predictive Marker - almost empty)
+        FULL,  // Close range (Full loading)
+        LOD_1, // Mid range (Entities sleep)
+        LOD_2, // Far range (Virtualization - terrain only)
+        LOD_3, // Ultra-Far range (Predictive Marker - almost empty)
+        LOD_4  // World range (Global Index - skeleton only)
     }
 
     /**
-     * Extracts LOD 0 data from a full chunk.
+     * Extracts LOD 4 data from a full chunk NBT.
      */
-    public LODChunk extractLOD(net.minecraft.world.level.chunk.ChunkAccess chunk) {
-        if (!(chunk instanceof net.minecraft.world.level.chunk.LevelChunk)) return null;
-        net.minecraft.world.level.chunk.LevelChunk levelChunk = (net.minecraft.world.level.chunk.LevelChunk) chunk;
+    public void extractLOD4(String worldName, int x, int z, net.minecraft.nbt.CompoundTag nbt) {
+        if (!nbt.contains("Heightmaps")) return;
+        
+        // Handle Optional return types if present in this Paper version
+        Object heightmapsObj = nbt.getCompound("Heightmaps");
+        net.minecraft.nbt.CompoundTag heightmaps;
+        if (heightmapsObj instanceof java.util.Optional) {
+            heightmaps = ((java.util.Optional<net.minecraft.nbt.CompoundTag>) heightmapsObj).orElse(null);
+        } else {
+            heightmaps = (net.minecraft.nbt.CompoundTag) heightmapsObj;
+        }
+        
+        if (heightmaps == null || !heightmaps.contains("WORLD_SURFACE")) return;
+        
+        Object surfaceObj = heightmaps.getLongArray("WORLD_SURFACE");
+        long[] surface;
+        if (surfaceObj instanceof java.util.Optional) {
+            surface = ((java.util.Optional<long[]>) surfaceObj).orElse(null);
+        } else {
+            surface = (long[]) surfaceObj;
+        }
+        
+        if (surface == null || surface.length == 0) return;
+        
+        // Extract a sample height (from the middle of the chunk)
+        int sampleHeight = (int) (surface[1] & 0x1FF); // Very rough sample
+        
+        GlobalIndexManager.getInstance().updateChunkInfo(worldName, x, z, 
+            GlobalIndexManager.pack(true, sampleHeight, 1)); // Biome 1 for now
+    }
+
+    /**
+     * Helper for hook-based extraction from SerializableChunkData.
+     */
+    public void extractLOD(net.minecraft.server.level.ServerLevel level, net.minecraft.world.level.chunk.ChunkAccess chunk) {
+        // Map Vanilla dimension keys to directory names used by GlobalIndexManager
+        String worldName = level.dimension().location().getPath();
+        if (worldName.contains("overworld")) worldName = "world";
+        else if (worldName.contains("nether")) worldName = "DIM-1";
+        else if (worldName.contains("the_end")) worldName = "DIM1";
+        
         int x = chunk.getPos().x;
         int z = chunk.getPos().z;
-        byte[] heightmap = new byte[256];
-        short[] surfaceBlocks = new short[256];
-
-        net.minecraft.world.level.levelgen.Heightmap hm = chunk.getOrCreateHeightmapUnprimed(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE);
         
-        for (int i = 0; i < 16; i++) {
-            for (int j = 0; j < 16; j++) {
-                int y = hm.getFirstAvailable(i, j) - 1;
-                heightmap[i * 16 + j] = (byte) Math.max(-128, Math.min(127, y));
-                
-                // Get surface block type (simplified)
-                net.minecraft.world.level.block.state.BlockState state = chunk.getBlockState(i, y, j);
-                surfaceBlocks[i * 16 + j] = (short) net.minecraft.world.level.block.Block.getId(state);
-            }
-        }
-
-        LODChunk lod = new LODChunk(x, z, heightmap, surfaceBlocks);
-        cacheLOD(lod);
-        return lod;
+        // Extract basic data for LOD 4 from the chunk NBT if possible
+        // Note: SerializableChunkData calls this before full serialization, 
+        // but we can compute heightmap samples directly from the chunk object here.
+        net.minecraft.world.level.levelgen.Heightmap hm = chunk.getOrCreateHeightmapUnprimed(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE);
+        int sampleHeight = hm.getFirstAvailable(8, 8);
+        
+        GlobalIndexManager.getInstance().updateChunkInfo(worldName, x, z, 
+            GlobalIndexManager.pack(true, sampleHeight, 1));
     }
 
     /**
@@ -125,6 +175,6 @@ public class LODManager {
      */
     public boolean shouldVirtualizedPrefetch(int playerX, int playerZ, int targetX, int targetZ) {
         LODLevel level = getRequiredLevel(playerX, playerZ, targetX, targetZ);
-        return level == LODLevel.LOD_2 || level == LODLevel.LOD_3;
+        return level == LODLevel.LOD_2 || level == LODLevel.LOD_3 || level == LODLevel.LOD_4;
     }
 }

@@ -180,6 +180,23 @@ max-memory-usage = 128
 # Use Java 22+ Foreign Memory API if available
 use-foreign-memory-api = true
 
+# LOD Distance Thresholds (v2.4.0)
+# Radius in chunks for each quality tier
+lod1-distance = 16
+lod2-distance = 32
+lod3-distance = 48
+
+# Ultra Pre-Chunking (Extreme lookahead)
+# Attempts to pre-warm LOD 3 markers at very large distances
+ultra-prechunking-enabled = false
+ultra-prechunking-radius = 128
+
+# LOD 4 Ghost Chunk Rendering
+# Enables visual rendering of chunks at extreme distances
+[storage.lod4]
+ghost-enabled = true
+ghost-cache-size = 2048
+
 [storage.streaming]
 # Intent-based Predictive Streaming
 # Takes precedence over simple velocity prefetch if enabled
@@ -615,6 +632,28 @@ highlight-corrupted = true
     
     public boolean useForeignMemoryApi() {
         return toml.getBoolean("storage.mmap.use-foreign-memory-api", true);
+    }
+    
+    // === LOD Tier Settings (v2.4.0) ===
+    
+    public int getLOD1Distance() {
+        return toml.getLong("storage.mmap.lod1-distance", 16L).intValue();
+    }
+    
+    public int getLOD2Distance() {
+        return toml.getLong("storage.mmap.lod2-distance", 32L).intValue();
+    }
+    
+    public int getLOD3Distance() {
+        return toml.getLong("storage.mmap.lod3-distance", 48L).intValue();
+    }
+    
+    public boolean isUltraPrechunkingEnabled() {
+        return toml.getBoolean("storage.mmap.ultra-prechunking-enabled", false);
+    }
+    
+    public int getUltraPrechunkingRadius() {
+        return toml.getLong("storage.mmap.ultra-prechunking-radius", 128L).intValue();
     }
     
     // === Streaming Settings ===

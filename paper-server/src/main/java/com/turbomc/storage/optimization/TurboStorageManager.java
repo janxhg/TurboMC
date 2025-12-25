@@ -177,13 +177,16 @@ public class TurboStorageManager implements AutoCloseable {
      */
     public void initialize() {
         if (isInitialized.compareAndSet(false, true)) {
-            System.out.println("[TurboMC][Storage] Initializing storage components...");
-            
-            // No global initialization needed - components are created on-demand per region
-            // This saves memory and resources for worlds that aren't actively used
-            
-            System.out.println("[TurboMC][Storage] Storage components initialized successfully.");
+            System.out.println("[TurboMC][Storage] Initializing storage manager...");
         }
+    }
+
+    /**
+     * Initialize storage for a specific world.
+     */
+    public void initWorld(String worldName, Path worldPath) {
+        System.out.println("[TurboMC][Storage] Initializing LOD 4 for world: " + worldName);
+        com.turbomc.storage.lod.GlobalIndexManager.getInstance().initialize(worldName, worldPath);
     }
     
     /**
@@ -238,15 +241,17 @@ public class TurboStorageManager implements AutoCloseable {
                     if (data != null) {
                         LRFChunkEntry chunk = new LRFChunkEntry(chunkX, chunkZ, data);
                         
-                        // Validate integrity if enabled
+                        // Validate integrity if enabled (speculative load if from prefetcher)
                         if (integrityEnabled) {
-                            return validateChunk(finalPath, chunkX, chunkZ, data)
-                                .thenApply(report -> {
+                            return validateChunk(finalPath, chunkX, chunkZ, data, false)
+                                .thenCompose(report -> {
                                     if (report.isCorrupted()) {
-                                        System.err.println("[TurboMC][Storage] Chunk corruption detected: " + 
-                                                         report.getMessage());
+                                        System.err.println("[TurboMC][Storage] Chunk corruption detected in MMap: " + 
+                                                         report.getMessage() + ". Discarding and falling back...");
+                                        // Return null to trigger fallbacks down the line
+                                        return CompletableFuture.completedFuture(null);
                                     }
-                                    return chunk;
+                                    return CompletableFuture.completedFuture(chunk);
                                 });
                         }
                         
@@ -280,11 +285,12 @@ public class TurboStorageManager implements AutoCloseable {
                 if (integrityEnabled) {
                     return future.thenCompose(chunk -> {
                         if (chunk != null) {
-                            return validateChunk(finalPath, chunkX, chunkZ, chunk.getData())
+                            return validateChunk(finalPath, chunkX, chunkZ, chunk.getData(), false)
                                 .thenApply(report -> {
                                     if (report.isCorrupted()) {
-                                        System.err.println("[TurboMC][Storage] Chunk corruption detected: " + 
+                                        System.err.println("[TurboMC][Storage] Chunk corruption detected in Batch: " + 
                                                          report.getMessage());
+                                        return null; // Don't return corrupted data
                                     }
                                     return chunk;
                                 });
@@ -431,14 +437,21 @@ public class TurboStorageManager implements AutoCloseable {
     }
     
     /**
+     * Validate a chunk's integrity speculatively (for prefetchers).
+     */
+    public CompletableFuture<com.turbomc.storage.integrity.ChunkIntegrityValidator.IntegrityReport> validateSpeculative(Path regionPath, int chunkX, int chunkZ, byte[] data) {
+        return validateChunk(regionPath, chunkX, chunkZ, data, true);
+    }
+
+    /**
      * Validate a chunk's integrity.
      */
-    private CompletableFuture<ChunkIntegrityValidator.IntegrityReport> validateChunk(Path regionPath, int chunkX, int chunkZ, byte[] data) {
+    private CompletableFuture<com.turbomc.storage.integrity.ChunkIntegrityValidator.IntegrityReport> validateChunk(Path regionPath, int chunkX, int chunkZ, byte[] data, boolean speculative) {
         regionPath = normalizePath(regionPath);
         if (integrityEnabled) {
             ChunkIntegrityValidator validator = getIntegrityValidator(regionPath);
             if (validator != null) {
-                return validator.validateChunk(chunkX, chunkZ, data);
+                return validator.validateChunk(chunkX, chunkZ, data, speculative);
             }
         }
         
@@ -715,7 +728,10 @@ public class TurboStorageManager implements AutoCloseable {
     @Override
     public void close() throws IOException {
         if (isClosed.compareAndSet(false, true)) {
-            System.out.println("[TurboMC][Storage] Shutting down storage manager...");
+            System.out.println("[TurboMC][Storage] Shutting down TurboMC storage manager...");
+            
+            // Save Global World Index (LOD 4)
+            com.turbomc.storage.lod.GlobalIndexManager.getInstance().saveAll();
             
             // FIXED: Add exception handling for resource cleanup
             for (ChunkBatchLoader loader : batchLoaders.values()) {
