@@ -49,6 +49,7 @@ public class ChunkBatchSaver implements AutoCloseable {
     private final long startTime;
     private final boolean isSharedPool;
     private final SharedRegionResource sharedResource;
+    private final com.turbomc.storage.mmap.FlushBarrier flushBarrier;
     
     // Persistent writer
     private LRFRegionWriter regionWriter;
@@ -125,6 +126,7 @@ public class ChunkBatchSaver implements AutoCloseable {
         this.chunksCompressed = new AtomicInteger(0);
         this.inflightChunks = new ConcurrentHashMap<>();
         this.startTime = System.currentTimeMillis();
+        this.flushBarrier = new com.turbomc.storage.mmap.FlushBarrier(false); // Non-verbose
         
         if (LRFRegionWriter.isVerbose()) {
             System.out.println("[TurboMC] ChunkBatchSaver initialized (SharedPools): " + regionPath.getFileName() +
@@ -169,6 +171,7 @@ public class ChunkBatchSaver implements AutoCloseable {
         this.inflightChunks = new ConcurrentHashMap<>();
         this.startTime = System.currentTimeMillis();
         this.isSharedPool = false;
+        this.flushBarrier = new com.turbomc.storage.mmap.FlushBarrier(false);
     }
     
     /**
@@ -371,10 +374,18 @@ public class ChunkBatchSaver implements AutoCloseable {
                 boolean shouldForce = (System.currentTimeMillis() - lastForceTime > 2000) || 
                                      (compressedChunks.size() >= batchSize / 2);
                 
-                regionWriter.flush(shouldForce);
+                // Acquire write lock before flushing to disk
+                flushBarrier.beforeFlush(regionPath);
                 
-                if (shouldForce) {
-                    lastForceTime = System.currentTimeMillis();
+                try {
+                    regionWriter.flush(shouldForce);
+                    
+                    if (shouldForce) {
+                        lastForceTime = System.currentTimeMillis();
+                    }
+                } finally {
+                    // Release lock after flush, forcing buffer to disk
+                    flushBarrier.afterFlush(regionPath, null);
                 }
             } catch (IOException e) {
                 throw new RuntimeException("Failed to write batch to " + regionPath, e);

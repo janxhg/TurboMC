@@ -95,6 +95,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
     // Intent-based Prediction
     private final com.turbomc.streaming.IntentPredictor intentPredictor;
     private final com.turbomc.storage.lod.LODManager lodManager; // TurboMC - LOD Manager
+    private final FlushBarrier flushBarrier; // TurboMC - Synchronization barrier
 
     
 
@@ -191,6 +192,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
         }
         
         resource.acquire();
+        this.flushBarrier = new FlushBarrier(false); // Non-verbose synchronization
         initializeFileMapping();
         startMaintenanceTasks();
     }

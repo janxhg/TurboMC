@@ -19,8 +19,9 @@
 ---
 
 ## 📅 Version Status
-**Current Stable:** v2.3.1 (The Parallel LOD Update)
-**Next Milestone:** v2.4.0 (Parallel Gen & Advanced SIMD)
+**Current Stable:** v2.3.2 (The Stability Update)
+**Next Milestone:** v2.3.3 (Chunk Memory Optimization)
+**Future:** v2.4.0 (Parallel Gen & Advanced SIMD)
 
 ---
 

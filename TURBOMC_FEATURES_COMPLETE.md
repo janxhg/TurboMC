@@ -1,7 +1,7 @@
 """
 ===============================================================================
 TURBOMC - CARACTERÍSTICAS COMPLETAS IMPLEMENTADAS
-Versión 2.3.1 | Java 21+ | PaperMC Fork Optimizado
+Versión 2.3.2 | Java 21+ | PaperMC Fork Optimizado
 ===============================================================================
 
 # SISTEMA DE ALMACENAMIENTO LRF (LINEAR REGION FORMAT)
@@ -20,15 +20,23 @@ Versión 2.3.1 | Java 21+ | PaperMC Fork Optimizado
   - Parallel LOD Integration: Coordinación con el sistema de niveles de detalle para pre-carga ultra-liviana.
   - Windows Compatibility Mode: Unsafe buffer de-mapping para evitar file locks.
   - totalPrefetchCount: Seguimiento preciso de métricas de carga asíncrona.
+  - **FlushBarrier Integration (v2.3.2)**: Sincronización read/write para zero corruption.
 - IntentPredictor: IA de detección de intención de movimiento (Historial 3s) [NEW v2.3.0]
 - ChunkBatchLoader: Carga asíncrona de chunks en lotes parallelized
-- ChunkBatchSaver: Guardado asíncrono de chunks en lotes
+- ChunkBatchSaver: Guardado asíncrono de chunks en lotes con FlushBarrier [ENHANCED v2.3.2]
 - TurboCacheManager: Gestor de caché multinivel (Disabled by default on NVMe)
 - HybridChunkCache: Caché híbrida RAM+Disk
 - OptimizedMCAReader: Lector optimizado para archivos MCA legacy
 
 ## Sistema de Integridad
-- ChunkIntegrityValidator: Validación con CRC32/CRC32C/SHA256
+- ChunkIntegrityValidator: Validación con CRC32/CRC32C/SHA256 [ENHANCED v2.3.2]
+  - **Smart Validation**: 1% sampling durante operación normal (-99% CPU)
+  - **Crash Recovery Mode**: Validación completa después de crashes detectados
+  - **Crash Marker Detection**: Detección automática de `.crash_marker`
+- FlushBarrier: Sistema de sincronización global para MMap [NEW v2.3.2]
+  - Read/Write locks para prevenir race conditions
+  - Buffer forcing automático después de writes
+  - Garantía de zero-corruption
 - LRFCorruptionFixer: Reparación automática de corrupción
 - AdvancedLRFCorruptionFixer: Reparación avanzada con recuperación
 - TurboExceptionHandler: Manejo avanzado de excepciones

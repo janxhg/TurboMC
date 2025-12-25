@@ -103,6 +103,12 @@ public class ChunkIntegrityValidator implements AutoCloseable {
     private final ConcurrentHashMap<Integer, Long> lastValidationTime;
     private final long validationIntervalMs;
     
+    // Smart validation (v2.3.3)
+    private final java.util.Set<Integer> validatedOnce;
+    private final boolean recentCrash;
+    private final java.util.Random random;
+    private final double validationProbability;
+    
     /**
      * Create integrity validator with default configuration.
      * 
@@ -148,11 +154,33 @@ public class ChunkIntegrityValidator implements AutoCloseable {
         this.checksumStorageSize = new AtomicLong(0);
         this.lastValidationTime = new ConcurrentHashMap<>();
         
+        // Smart validation initialization
+        this.validatedOnce = ConcurrentHashMap.newKeySet();
+        this.random = new java.util.Random();
+        this.recentCrash = this.detectRecentCrashInternal();
+        
+        // Validation probability: 100% after crash, 1% during normal operation
+        this.validationProbability = recentCrash ? 1.0 : 0.01;
+        
         System.out.println("[TurboMC] ChunkIntegrityValidator initialized: " + regionPath.getFileName() +
                          " (primary: " + primaryAlgorithm.getName() +
                          ", backup: " + backupAlgorithm.getName() +
                          ", auto-repair: " + enableAutoRepair +
-                         ", threads: " + validationThreads + ")");
+                         ", threads: " + validationThreads + ")" + 
+                         (recentCrash ? " [CRASH RECOVERY MODE]" : ""));
+    }
+    
+    /**
+     * Detect recent server crash.
+     * Looks for crash marker file in server directory.
+     */
+    private boolean detectRecentCrashInternal() {
+        try {
+            Path crashMarker = regionPath.getParent().getParent().resolve(".crash_marker");
+            return java.nio.file.Files.exists(crashMarker);
+        } catch (Exception e) {
+            return false; // Assume no crash if detection fails
+        }
     }
     
     /**
