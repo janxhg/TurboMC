@@ -45,23 +45,30 @@ for (LevelChunkSection section : chunk.getSections()) {
 
 ---
 
-### Point 2: Chunk Serialization
+### Point 2: Chunk Serialization (CRITICAL)
 
 **File**: `net.minecraft.world.level.chunk.storage.SerializableChunkData`  
 **Method**: `copyOf(ServerLevel, ChunkAccess)` - line ~447
 
 ```java
-// AFTER line 449 (LOD extraction hook)
-// Add this:
+// 1. Hook EmptySectionPruner
 if (chunk instanceof LevelChunk levelChunk) {
-    // v2.3.3 - Prune empty sections before serialization
     if (TurboConfig.getInstance().isPruneSectionsEnabled()) {
         EmptySectionPruner.pruneEmptySections(levelChunk);
     }
 }
+
+// 2. IMPORTANT: Section Loop Fix (line ~477)
+// Because sections can be null now, you MUST check before .copy()
+final LevelChunkSection chunkSection = 
+    (blockSectionIdx >= 0 && 
+     blockSectionIdx < chunkSections.length && 
+     chunkSections[blockSectionIdx] != null) // <-- Added check
+    ? chunkSections[blockSectionIdx].copy() 
+    : null;
 ```
 
-**Expected Result**: Empty sections nullified before NBT creation
+**Expected Result**: Empty sections nullified safely without NPE
 
 ---
 
