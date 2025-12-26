@@ -1,7 +1,18 @@
-# TurboMC v2.3.1 — The Parallel LOD Update
+# TurboMC v2.3.4 — The Dynamic Throttling Update
 
 ## 🚀 Overview
 TurboMC es un fork avanzado de PaperMC enfocado en **velocidad extrema**, **almacenamiento moderno** e **integridad de datos**, diseñado para servidores que no pueden permitirse ni un milisegundo de retraso.
+
+## 📈 Dynamic Event Throttling (v2.3.4) [NUEVO]
+**Estado:** Implementado & Validado
+**Clases:** `EventThrottle`, `HealthMonitor`, `LivingEntity`, `ServerGamePacketListenerImpl`
+
+Reducción masiva de la carga en el hilo principal mediante el filtrado inteligente de eventos de movimiento de jugadores y entidades.
+
+- **Intelligent Skipping:** Evalúa el delta de movimiento y rotación antes de disparar `PlayerMoveEvent` y `EntityMoveEvent`.
+- **Health-Aware Scales:** Los umbrales de filtrado se ajustan automáticamente según el MSPT y TPS del servidor.
+- **Zero-Listener Optimization:** Bypass total si no hay plugins escuchando los eventos, eliminando cualquier cálculo innecesario.
+- **Proprietary Integration:** Integrado profundamente en el core de PaperMC con marcas de propiedad de TurboMC.
 
 ## 🏗️ Optimized Voxel Format (OVF) [NUEVO v2.0]
 **Estado:** Implementado & Validado
@@ -24,6 +35,16 @@ El motor de almacenamiento LRF ha evolucionado en la v2.3 a un sistema de **Stre
 - **Probability Tunnels:** Genera un túnel de carga probabilístico en lugar de un vector lineal, cubriendo cambios de dirección detectados en tiempo real.
 - **ELYTRA & TRIDENT MULTIPLIERS:** Multiplica dinámicamente el lookahead al detectar vuelos de alta velocidad, permitiendo una carga fluida de hasta **64 chunks** de distancia.
 - **PARALLEL CHUNK PIPELINE:** Optimización de hilos que permite la carga paralela masiva distribuida entre múltiples regiones de forma asíncrona.
+
+## 🛡️ System Validation & Testing Suite (v2.3.3) [NUEVO]
+**Estado:** Activo & Verificado
+**Tests:** `TurboAutopilotTest`, `LOD4StorageTest`, `FlushBarrierTest`, `TurboWorldIntegrationTest`
+
+Garantía de estabilidad mediante una suite de tests automatizados que se ejecutan directamente en el entorno de desarrollo.
+
+- **Storage Stress Test:** Más de 10,000 operaciones concurrentes validadas por `FlushBarrier`.
+- **Integrity Guarantee:** Verificación automática de checksums primarios y secundarios.
+- **Integration Confidence:** Validación de flujos reales de PaperMC con el motor LRF.
 
 ## 🧵 4-Tier Parallel LOD (v2.3.1) [NUEVO]
 **Estado:** Implementado & Validado

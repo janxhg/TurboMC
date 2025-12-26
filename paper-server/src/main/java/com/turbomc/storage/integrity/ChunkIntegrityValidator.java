@@ -258,12 +258,19 @@ public class ChunkIntegrityValidator implements AutoCloseable {
                         try { Thread.sleep(50 * retryCount); } catch (InterruptedException ignored) {}
                         
                         // v2.4.1 Fix: On corruption retry, bypass MMap cache and re-read from batch/disk
+                        // v2.4.2 Fix: Use loadChunkBypassValidation to PREVENT DEADLOCKS
                         if (!speculative && retryCount == 1) {
-                            byte[] freshData = TurboStorageManager.getInstance().loadChunk(regionPath, chunkX, chunkZ)
-                                .thenApply(c -> c != null ? c.getData() : null)
-                                .get(5, TimeUnit.SECONDS);
-                            if (freshData != null) {
-                                currentData = freshData;
+                            try {
+                                byte[] freshData = TurboStorageManager.getInstance()
+                                    .loadChunkBypassValidation(regionPath, chunkX, chunkZ)
+                                    .thenApply(c -> c != null ? c.getData() : null)
+                                    .get(5, TimeUnit.SECONDS);
+                                if (freshData != null) {
+                                    currentData = freshData;
+                                }
+                            } catch (Exception e) {
+                                System.err.println("[TurboMC][Integrity] Retry read failed for [" + chunkX + ", " + chunkZ + "]: " + 
+                                                 (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()));
                             }
                         }
                         continue; 
@@ -290,8 +297,9 @@ public class ChunkIntegrityValidator implements AutoCloseable {
                     return new IntegrityReport(chunkX, chunkZ, result, message, currentData.length);
                     
                 } catch (Exception e) {
+                    String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                     return new IntegrityReport(chunkX, chunkZ, ValidationResult.CORRUPTED,
-                                             "Validation error: " + e.getMessage(), 0);
+                                             "Validation error: " + errorMsg, 0);
                 }
             }
             return new IntegrityReport(chunkX, chunkZ, ValidationResult.CORRUPTED, "Unknown validation failure", 0);

@@ -451,6 +451,6 @@ BlockStatePool.get(id);             // Returns BlockState
 
 ---
 
-**Version**: TurboMC v2.3.3  
-**Last Updated**: 2025-12-25  
+**Version**: TurboMC v2.3.4 (The Dynamic Throttling Update)  
+**Last Updated**: 2025-12-26  
 **Maintainer**: TurboMC Team

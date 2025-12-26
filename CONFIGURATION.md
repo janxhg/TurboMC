@@ -352,5 +352,21 @@ Use `/turbo monitor` command to see:
 
 ---
 
-**Last Updated**: 2025-12-25
-**Version**: 2.3.1 (The Parallel LOD Update)
+## 📈 Dynamic Event Throttling (v2.3.4) [NUEVO]
+
+TurboMC v2.3.4 introduce un sistema de throttling dinámico para eventos de movimiento (`PlayerMoveEvent` y `EntityMoveEvent`). Este sistema se ajusta automáticamente según la salud del servidor (`HealthSnapshot`).
+
+### Throttling Predictivo
+| Estado del Servidor | Umbral Movimiento (m) | Umbral Rotación (°) |
+| :--- | :--- | :--- |
+| **Healthy** (MSPT < 45) | 0.0625 (1/16 block) | 10.0° |
+| **Struggling** (MSPT > 50)| 0.083 (1/12 block) | 20.0° |
+| **Critical** (MSPT > 100) | 0.125 (1/8 block) | 30.0° |
+
+> [!NOTE]
+> Estos valores están optimizados para reducir el uso de CPU en el Main Thread sin impactar la precisión visual del cliente. Si no hay plugins escuchando estos eventos, el sistema los desactiva globalmente para costo cero.
+
+---
+
+**Last Updated**: 2025-12-26
+**Version**: 2.3.4 (The Dynamic Throttling Update)

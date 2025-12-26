@@ -713,7 +713,8 @@ public class TurboRegionFileStorage extends RegionFileStorage {
                     ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData.ReadResult.SYNC_READ, null, tag, 0
                 );
             } catch (Exception e) {
-                System.err.println("[TurboMC][RegionStorage] Error in moonrise$readData Turbo path: " + e.getMessage());
+                String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                System.err.println("[TurboMC][RegionStorage] Error in moonrise$readData Turbo path for [" + chunkX + ", " + chunkZ + "]: " + errorMsg);
             }
         }
 

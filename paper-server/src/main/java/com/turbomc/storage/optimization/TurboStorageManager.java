@@ -238,6 +238,21 @@ public class TurboStorageManager implements AutoCloseable {
      * @return CompletableFuture that completes with the chunk data
      */
     public CompletableFuture<LRFChunkEntry> loadChunk(Path regionPath, int chunkX, int chunkZ) {
+        return loadChunkInternal(regionPath, chunkX, chunkZ, true);
+    }
+    
+    /**
+     * Load a chunk while explicitly bypassing integrity validation.
+     * USED INTERNALLY FOR CORRUPTION RECOVERY TO PREVENT DEADLOCKS.
+     */
+    public CompletableFuture<LRFChunkEntry> loadChunkBypassValidation(Path regionPath, int chunkX, int chunkZ) {
+        return loadChunkInternal(regionPath, chunkX, chunkZ, false);
+    }
+    
+    /**
+     * Internal chunk loading logic with optional validation.
+     */
+    private CompletableFuture<LRFChunkEntry> loadChunkInternal(Path regionPath, int chunkX, int chunkZ, boolean validate) {
         if (isClosed.get()) {
             throw new IllegalStateException("Storage manager is closed");
         }
@@ -253,8 +268,8 @@ public class TurboStorageManager implements AutoCloseable {
                     if (data != null) {
                         LRFChunkEntry chunk = new LRFChunkEntry(chunkX, chunkZ, data);
                         
-                        // Validate integrity if enabled (speculative load if from prefetcher)
-                        if (integrityEnabled) {
+                        // Validate integrity if enabled and requested
+                        if (integrityEnabled && validate) {
                             return validateChunk(finalPath, chunkX, chunkZ, data, false)
                                 .thenCompose(report -> {
                                     if (report.isCorrupted()) {
@@ -276,7 +291,6 @@ public class TurboStorageManager implements AutoCloseable {
         }
         
         // Check pending writes in BatchSaver (Read-Your-Writes Consistency)
-        // This is critical for generation performance to avoid checking disk for chunks currently in write buffer
         if (batchEnabled) {
             ChunkBatchSaver saver = batchSavers.get(finalPath);
             if (saver != null) {
@@ -293,8 +307,8 @@ public class TurboStorageManager implements AutoCloseable {
             if (loader != null) {
                 CompletableFuture<LRFChunkEntry> future = loader.loadChunk(chunkX, chunkZ);
                 
-                // Validate integrity if enabled
-                if (integrityEnabled) {
+                // Validate integrity if enabled and requested
+                if (integrityEnabled && validate) {
                     return future.thenCompose(chunk -> {
                         if (chunk != null) {
                             return validateChunk(finalPath, chunkX, chunkZ, chunk.getData(), false)

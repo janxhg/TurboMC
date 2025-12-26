@@ -238,4 +238,4 @@ For issues or questions:
 
 ---
 
-**TurboMC v2.0.0 (The Speed Update)** | LRF Storage System v2 Ready
+**TurboMC v2.3.4 (The Dynamic Throttling Update)** | LRF Storage System v2 Ready & Verified

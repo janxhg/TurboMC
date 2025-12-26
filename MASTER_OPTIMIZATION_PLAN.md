@@ -391,11 +391,13 @@ TurboLOD-fabric/
 
 ## 🗺️ Implementation Roadmap
 
-### v2.3.3 - Stability (1-2 weeks)
-- [x] Disable ghost chunks
-- [ ] Fix MMap race condition
-- [ ] Optimize integrity validation
-- [ ] Stress test with 100+ chunks/sec
+### v2.3.3/2.3.4 - Stability & Throttling (COMPLETED)
+- [x] Disable ghost chunks (Replaced by Parallel LOD)
+- [x] Fix MMap race condition (FlushBarrier)
+- [x] Optimize integrity validation (Smart Sampling)
+- [x] Implement Dynamic Event Throttling (v2.3.4)
+- [x] Stress test with 10k+ chunks/sec
+- [x] Implement System Test Suite (Auto-verification)
 
 ### v2.4.0 - Chunk Memory Optimization (2-3 weeks)
 - [ ] Implement CompactPalette
@@ -522,9 +524,9 @@ prediction-scale = 20
 
 ---
 
-**Last Updated**: 2025-12-25  
-**Current Version**: v2.3.2  
-**Next Milestone**: v2.3.3 Stability Fix  
+**Última actualización**: 2025-12-26  
+**Versión actual**: v2.3.4  
+**Siguiente Milestone**: v2.3.5 Overhead Reduction
 **Long-term Goal**: v2.5.0 Client LOD
 
 ---

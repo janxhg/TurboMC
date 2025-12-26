@@ -19,8 +19,8 @@
 ---
 
 ## 📅 Version Status
-**Current Stable:** v2.3.2 (The Stability Update)
-**Next Milestone:** v2.3.3 (Chunk Memory Optimization)
+**Current Stable:** v2.3.4 (The Dynamic Throttling Update)
+**Next Milestone:** v2.3.5 (Low-Latency NBT Serialization)
 **Future:** v2.4.0 (Parallel Gen & Advanced SIMD)
 
 ---
@@ -593,5 +593,5 @@ mode: turbo  # or 'vanilla'
 
 ---
 
-**Última actualización:** 2025-12-25
-**Versión del documento:** 2.3.1
+**Última actualización:** 2025-12-26
+**Versión del documento:** 2.3.4

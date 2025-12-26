@@ -1,6 +1,6 @@
 # TurboMC 🚀
 
-**Versión 2.3.2 (The Stability Update)**  
+**Versión 2.3.4 (The Dynamic Throttling Update)**  
 Fork avanzado de **PaperMC 1.21.10** optimizado para **velocidad extrema**, **almacenamiento moderno** y **servidores de última generación**.
 
 [Changelog](./Changelogs.md) · [Features](./TURBOMC_FEATURES_COMPLETE.md) · [Benchmarks](./BENCHMARKS.md)
@@ -38,8 +38,10 @@ TurboMC redefine el rendimiento en Minecraft. Reemplaza el almacenamiento MCA po
  ---
 
 ## ⚡ Rendimiento de Próxima Generación
+- **Dynamic Event Throttling (v2.3.4)**: Reducción drástica del overhead en el hilo principal mediante el skipping inteligente de eventos de movimiento basado en la salud del servidor.
 - **FlushBarrier Synchronization (v2.3.2)**: Eliminación total del race condition de MMap para cero corrupción.
 - **Smart Validation (v2.3.2)**: Sampling inteligente del 1% reduce overhead de CPU en 99%.
+- **Verified Zero-Stutter Stack (v2.3.3)**: Suite completa de tests automatizados que garantizan la integridad de I/O y sincronización MMap.
 - **4-Tier Parallel LOD System (v2.3.1)**: Jerarquía dinámica que permite pre-cargar hasta **64 chunks** con costo CPU/IO cercano a cero para el 75% del radio.
 - **SIMD Collision Engine**: Vector API para físicas paralelas.
 - **Deep Prefetching Engine**: Lookahead coordinado de hasta 512 bloques.

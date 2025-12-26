@@ -90,9 +90,15 @@ public class LRFRegionFileAdapter extends RegionFile {
             
             return new DataInputStream(new ByteArrayInputStream(data));
         } catch (Exception e) {
-            System.err.println("[TurboMC][LRFAdapter] Turbo load failed for " + chunkPos + ": " + e.getMessage());
+            String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            System.err.println("[TurboMC][LRFAdapter] Turbo load failed for " + chunkPos + ": " + errorMsg);
             // Fallback to legacy sync read if manager fails (should not happen)
-            return super.getChunkDataInputStream(chunkPos);
+            try {
+                return super.getChunkDataInputStream(chunkPos);
+            } catch (Exception e2) {
+                System.err.println("[TurboMC][LRFAdapter] Vanilla fallback failed for " + chunkPos + ": " + e2.getMessage());
+                return null;
+            }
         }
     }
 

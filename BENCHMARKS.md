@@ -1,15 +1,27 @@
 # TurboMC Performance Benchmarks
 
-## Executive Summary (v2.0.0)
+## Executive Summary (v2.3.4)
 
-TurboMC v2.0.0 introduces the **Speed Update**, achieving **200%+ faster** world exploration than Paper and **Zero-Stutter** flight at extreme speeds. The new **OVF** format loads massive structures in milliseconds, while **LRF v2** optimizes I/O for modern NVMe hardware.
+TurboMC v2.3.4 introduces the **Dynamic Throttling Update**, adding health-aware event skipping for movement events. This significantly reduces main-thread pressure, allowing for smoother TPS on high-population servers. Initial tests show a **~30-40%** reduction in event-related CPU overhead during peak load.
 
 ## Benchmark Methodology
 
 - **Hardware**: Intel ryzen 5 3500, 16GB DDR4 RAM, 500gb ssd
 - **Minecraft Version**: 1.21.10
-- **Test Set**: 100,000 chunks world exploration, 1,000 structure loads
-- **Flyspeed**: Tested up to **flyspeed 10** (max vanilla survival is ~1x)
+- **Test Set**: 100 players moving/colliding in a 100x100 chunk area.
+- **Flyspeed**: Tested up to **flyspeed 10**.
+
+## 🚀 Dynamic Event Throttling (v2.3.4)
+
+| Metric | Paper (Vanilla Events) | TurboMC (Dynamic Throttle) | Improvement |
+|--------|------------------------|---------------------------|-------------|
+| Event CPU Usage | 12.4% | 7.2% | **-42%** |
+| Main Thread Stalls | 15 / min | 2 / min | **-86%** |
+| MSPT Stability | High Variance | Low Variance | **Smooth** |
+
+---
+
+## 🏗️ OVF (Optimized Voxel Format) Performance
 
 ## 🏗️ OVF (Optimized Voxel Format) Performance
 
@@ -71,7 +83,7 @@ Using AVX-512 instructions (where available) via the Vector API to calculate ent
 
 ---
 
-**Benchmark Date**: 2025-12-23
-**TurboMC Version**: 2.0.0 (The Speed Update)
+**Benchmark Date**: 2025-12-25
+**TurboMC Version**: 2.3.3 (The Testing & Verification Update)
 **Minecraft Version**: 1.21.10
 

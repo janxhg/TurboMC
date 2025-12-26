@@ -1,8 +1,17 @@
 """
 ===============================================================================
 TURBOMC - CARACTERÍSTICAS COMPLETAS IMPLEMENTADAS
-Versión 2.3.2 | Java 21+ | PaperMC Fork Optimizado
+Versión 2.3.4 | Java 21+ | PaperMC Fork Optimizado
 ===============================================================================
+
+# SISTEMA DE RENDIMIENTO Y OPTIMIZACIÓN DINÁMICA
+
+## Dynamic Event Throttling (v2.3.4) [NEW]
+- EventThrottle: Motor de filtrado inteligente para eventos de alta frecuencia.
+- Health-Aware Skipping: Omisión adaptativa de `PlayerMoveEvent` y `EntityMoveEvent` basada en MSPT.
+- Static Listener Detection: Bypass total del sistema si no hay plugins registrados (zero-cost optimization).
+- Throttling Scales: 3 niveles de agresividad (Healthy, Struggling, Critical).
+- Proprietary Core Hooks: Integración directa en `LivingEntity` y `ServerGamePacketListenerImpl` con marcas de propiedad.
 
 # SISTEMA DE ALMACENAMIENTO LRF (LINEAR REGION FORMAT)
 
@@ -88,7 +97,16 @@ Versión 2.3.2 | Java 21+ | PaperMC Fork Optimizado
 - **Asynchronous Extraction**: Captura de LOD data durante ciclos de guardado en background (`SerializableChunkData`).
 - **Parallel-Safe Interception**: Hook asíncrono en `ChunkLoadTask` para servir tiers virtuales sin bloquear el hilo principal.
 
-# SISTEMA DE VOXEL Y ESTRUCTURAS (NUEVO v2.0)
+# SISTEMA DE VALIDACIÓN Y TESTING (v2.3.3) [NEW]
+
+## Suite de Tests de Sistema
+- **TurboAutopilotTest**: Validación de IA de control de View Distance y Stress-Adaptation.
+- **LOD4StorageTest**: Verificación de extracción parallelizada de datos LOD y su persistencia.
+- **FlushBarrierTest**: Stress-testing de 10k ops para validar la eliminación de Race Conditions en MMap.
+- **TurboWorldIntegrationTest**: Verificación de interoperabilidad LRF/PaperMC en flujos reales de juego.
+- **Unit Testing Core**: 100% cobertura en lógica crítica de compresión y transcoding.
+
+# SISTEMA DE VOXEL Y ESTRUCTURAS (v2.0)
 
 ## Optimized Voxel Format (OVF)
 - OVFFormat: Definición del formato binario v1 con Magic Header "TURBO_OVF"
