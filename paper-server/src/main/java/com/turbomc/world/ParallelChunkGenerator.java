@@ -24,7 +24,7 @@ import java.util.ArrayList;
 public class ParallelChunkGenerator {
     
     private final ServerLevel world;
-    private final ServerChunkCache chunkCache;
+    private ServerChunkCache chunkCache;
     private final ExecutorService generatorExecutor;
     private final PriorityBlockingQueue<GenerationTask> taskQueue;
     private final ConcurrentHashMap<Long, CompletableFuture<ChunkAccess>> pendingGenerations;
@@ -44,14 +44,14 @@ public class ParallelChunkGenerator {
     
     public ParallelChunkGenerator(ServerLevel world, TurboConfig config) {
         this.world = world;
-        this.chunkCache = world.getChunkSource();
+        // Moved to lazy getter to avoid NPE during world initialization
         this.startTime = System.currentTimeMillis();
         
         // Load configuration
         this.enabled = config.getBoolean("world.generation.parallel-enabled", true);
         int threads = config.getInt("world.generation.generation-threads", 0);
         if (threads <= 0) {
-            threads = Math.max(4, Runtime.getRuntime().availableProcessors() / 2);
+            threads = com.turbomc.core.autopilot.TurboAutopilot.getInstance().getIdealGenerationThreads();
         }
         this.maxConcurrentGenerations = config.getInt("world.generation.max-concurrent-generations", 16);
         this.priorityMode = config.getString("world.generation.priority-mode", "direction");
@@ -107,9 +107,25 @@ public class ParallelChunkGenerator {
     }
     
     /**
+     * Internal helper to get chunk cache safely.
+     */
+    private ServerChunkCache getChunkCache() {
+        if (chunkCache == null) {
+            chunkCache = world.getChunkSource();
+        }
+        return chunkCache;
+    }
+
+    /**
      * Process next generation task from queue.
      */
     private void processNextTask() {
+        // Load-aware throttling (v2.3.3)
+        var health = com.turbomc.core.autopilot.HealthMonitor.getInstance().getLastSnapshot();
+        if (health.isCritical()) {
+            try { Thread.sleep(50); } catch (InterruptedException ignored) {} // Slow down
+        }
+
         GenerationTask task = taskQueue.poll();
         if (task == null) {
             return;
@@ -118,11 +134,23 @@ public class ParallelChunkGenerator {
         long startGen = System.nanoTime();
         try {
             // Generate chunk using vanilla system
-            ChunkAccess chunk = chunkCache.getChunk(task.chunkX, task.chunkZ, ChunkStatus.FULL, true);
+            ServerChunkCache cache = getChunkCache();
+            if (cache == null) {
+                // Try again later
+                taskQueue.offer(task);
+                return;
+            }
+            ChunkAccess chunk = cache.getChunk(task.chunkX, task.chunkZ, ChunkStatus.FULL, true);
             
             long duration = (System.nanoTime() - startGen) / 1_000_000; // ms
             totalGenerationTime.addAndGet(duration);
-            chunksGenerated.incrementAndGet();
+            int generated = chunksGenerated.incrementAndGet();
+            
+            // Periodic progress logging (v2.3.3)
+            if (generated % 100 == 0) {
+                System.out.println("[TurboMC][ParallelGen] Generated " + generated + " chunks for world " + world.dimension().location().getPath() + 
+                                 " (Avg: " + String.format("%.1f", (double)totalGenerationTime.get() / generated) + "ms/chunk)");
+            }
             
             task.future.complete(chunk);
         } catch (Exception e) {
@@ -187,7 +215,8 @@ public class ParallelChunkGenerator {
     private boolean chunkExistsOnDisk(int chunkX, int chunkZ) {
         try {
             // This is a fast check that doesn't trigger generation
-            return chunkCache.hasChunk(chunkX, chunkZ);
+            ServerChunkCache cache = getChunkCache();
+            return cache != null && cache.hasChunk(chunkX, chunkZ);
         } catch (Exception e) {
             return false;
         }

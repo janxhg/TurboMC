@@ -16,12 +16,14 @@ public class TurboWorldManager {
     
     private static TurboWorldManager instance;
     private final ConcurrentHashMap<String, ParallelChunkGenerator> generators;
+    private final ConcurrentHashMap<String, ChunkPrefetcher> prefetchers;
     private final TurboConfig config;
     private final boolean enabled;
     
     private TurboWorldManager() {
         this.config = TurboConfig.getInstance();
         this.generators = new ConcurrentHashMap<>();
+        this.prefetchers = new ConcurrentHashMap<>();
         this.enabled = config.getBoolean("world.generation.parallel-enabled", true);
         
         if (enabled) {
@@ -50,7 +52,16 @@ public class TurboWorldManager {
         
         String worldName = world.dimension().location().toString();
         return generators.computeIfAbsent(worldName, k -> {
-            return new ParallelChunkGenerator(world, config);
+            ParallelChunkGenerator gen = new ParallelChunkGenerator(world, config);
+            
+            // Auto-start prefetcher if HyperView is enabled
+            if (config.getBoolean("world.generation.hyperview-enabled", true)) {
+                ChunkPrefetcher prefetcher = new ChunkPrefetcher(world, gen);
+                prefetchers.put(worldName, prefetcher);
+                prefetcher.start();
+            }
+            
+            return gen;
         });
     }
     
@@ -59,14 +70,20 @@ public class TurboWorldManager {
      */
     public void shutdown() {
         System.out.println("[TurboMC][WorldManager] Shutting down parallel generators...");
+        for (ChunkPrefetcher prefetcher : prefetchers.values()) {
+            prefetcher.stop();
+        }
+        prefetchers.clear();
+        
         for (ParallelChunkGenerator generator : generators.values()) {
             generator.shutdown();
         }
         generators.clear();
     }
     
+
     /**
-     * Get statistics for all generators.
+     * Get HyperView stats.
      */
     public String getStats() {
         if (generators.isEmpty()) {
@@ -78,7 +95,16 @@ public class TurboWorldManager {
         for (var entry : generators.entrySet()) {
             sb.append("  ").append(entry.getKey()).append(": ")
               .append(entry.getValue().getStats()).append("\n");
+            
+            ChunkPrefetcher pre = prefetchers.get(entry.getKey());
+            if (pre != null) {
+                sb.append("    HyperView Radius: ").append(pre.getRadius()).append("\n");
+            }
         }
         return sb.toString();
+    }
+    
+    public ChunkPrefetcher getPrefetcher(String worldName) {
+        return prefetchers.get(worldName);
     }
 }

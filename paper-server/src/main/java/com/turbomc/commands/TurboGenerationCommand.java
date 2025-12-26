@@ -13,6 +13,34 @@ import com.turbomc.config.TurboConfig;
  * @version 2.3.0
  */
 public class TurboGenerationCommand {
+
+    public static void register(com.mojang.brigadier.CommandDispatcher<net.minecraft.commands.CommandSourceStack> dispatcher) {
+        dispatcher.register(net.minecraft.commands.Commands.literal("turbo")
+            .then(net.minecraft.commands.Commands.literal("gen")
+                .requires(source -> source.hasPermission(2, "turbomc.admin.generation"))
+                .then(net.minecraft.commands.Commands.literal("stats")
+                    .executes(context -> {
+                        showStats(context.getSource().getBukkitSender());
+                        return 1;
+                    })
+                )
+                .then(net.minecraft.commands.Commands.literal("queue")
+                    .executes(context -> {
+                        showQueue(context.getSource().getBukkitSender());
+                        return 1;
+                    })
+                )
+                .then(net.minecraft.commands.Commands.literal("toggle")
+                    .then(net.minecraft.commands.Commands.argument("enabled", com.mojang.brigadier.arguments.BoolArgumentType.bool())
+                        .executes(context -> {
+                            toggle(context.getSource().getBukkitSender(), com.mojang.brigadier.arguments.BoolArgumentType.getBool(context, "enabled"));
+                            return 1;
+                        })
+                    )
+                )
+            )
+        );
+    }
     
     public static void showStats(CommandSender sender) {
         sender.sendMessage("§6╔═══════════════════════════════════════════╗");

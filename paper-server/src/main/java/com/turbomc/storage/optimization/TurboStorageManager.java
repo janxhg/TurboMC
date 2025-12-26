@@ -59,6 +59,18 @@ public class TurboStorageManager implements AutoCloseable {
     private ExecutorService globalCompressionExecutor;
     private ExecutorService globalDecompressionExecutor;
     private ExecutorService globalPrefetchExecutor; // Dedicated pool for prefetching
+
+    public ExecutorService getCompressionExecutor() {
+        return globalCompressionExecutor;
+    }
+
+    public ExecutorService getDecompressionExecutor() {
+        return globalDecompressionExecutor;
+    }
+
+    public ExecutorService getPrefetchExecutor() {
+        return globalPrefetchExecutor;
+    }
     
     private TurboStorageManager(TurboConfig config) {
         this.config = config;

@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.Map;
+import com.turbomc.storage.optimization.TurboStorageManager;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -200,13 +201,14 @@ public class ChunkIntegrityValidator implements AutoCloseable {
      */
     public CompletableFuture<IntegrityReport> validateChunk(int chunkX, int chunkZ, byte[] data, boolean speculative) {
         return CompletableFuture.supplyAsync(() -> {
+            byte[] currentData = data;
             long startTime = System.currentTimeMillis();
             int maxRetries = speculative ? 3 : 2; // More retries for speculative reads
             int retryCount = 0;
             
             while (retryCount <= maxRetries) {
                 try {
-                    if (data == null || data.length == 0) {
+                    if (currentData == null || currentData.length == 0) {
                         return new IntegrityReport(chunkX, chunkZ, ValidationResult.MISSING, 
                                                  "Chunk data is null or empty", 0);
                     }
@@ -220,7 +222,7 @@ public class ChunkIntegrityValidator implements AutoCloseable {
                     if (storedChecksum == null) {
                         // First time seeing this chunk - calculate and store checksum
                         // If it's speculative, we might want to be careful, but for now we trust it
-                        ChunkChecksum newChecksum = calculateChecksums(chunkX, chunkZ, data);
+                        ChunkChecksum newChecksum = calculateChecksums(chunkX, chunkZ, currentData);
                         synchronized (checksums) {
                             checksums.put(chunkIndex, newChecksum);
                             checksumStorageSize.addAndGet(estimateChecksumSize(newChecksum));
@@ -229,17 +231,17 @@ public class ChunkIntegrityValidator implements AutoCloseable {
                         
                         return new IntegrityReport(chunkX, chunkZ, ValidationResult.VALID,
                                                  "First-time validation - checksum stored", 
-                                                 data.length);
+                                                 currentData.length);
                     }
                     
                     // Validate with primary algorithm
-                    String primaryChecksum = calculateChecksum(data, primaryAlgorithm);
+                    String primaryChecksum = calculateChecksum(currentData, primaryAlgorithm);
                     boolean primaryValid = primaryChecksum.equals(storedChecksum.getPrimaryChecksum());
                     
                     // Validate with backup algorithm if primary fails
                     boolean backupValid = true;
                     if (!primaryValid && backupAlgorithm != null) {
-                        String backupChecksum = calculateChecksum(data, backupAlgorithm);
+                        String backupChecksum = calculateChecksum(currentData, backupAlgorithm);
                         backupValid = (storedChecksum.getBackupChecksum() == null) || backupChecksum.equals(storedChecksum.getBackupChecksum());
                     }
                     
@@ -247,17 +249,23 @@ public class ChunkIntegrityValidator implements AutoCloseable {
                         lastValidationTime.put(chunkIndex, System.currentTimeMillis());
                         chunksValidated.incrementAndGet();
                         validationTime.addAndGet(System.currentTimeMillis() - startTime);
-                        return new IntegrityReport(chunkX, chunkZ, ValidationResult.VALID, "All checksums match", data.length);
+                        return new IntegrityReport(chunkX, chunkZ, ValidationResult.VALID, "All checksums match", currentData.length);
                     }
 
                     // Mismatch detected - Retry before flagging corruption
                     if (retryCount < maxRetries) {
                         retryCount++;
                         try { Thread.sleep(50 * retryCount); } catch (InterruptedException ignored) {}
-                        // In a real scenario, we might want to re-read the data from disk here,
-                        // but since the data is passed as an argument, we assume the caller
-                        // might be providing a fresh buffer or we just trust the retry loop
-                        // to rule out transient memory/concurrency artifacts.
+                        
+                        // v2.4.1 Fix: On corruption retry, bypass MMap cache and re-read from batch/disk
+                        if (!speculative && retryCount == 1) {
+                            byte[] freshData = TurboStorageManager.getInstance().loadChunk(regionPath, chunkX, chunkZ)
+                                .thenApply(c -> c != null ? c.getData() : null)
+                                .get(5, TimeUnit.SECONDS);
+                            if (freshData != null) {
+                                currentData = freshData;
+                            }
+                        }
                         continue; 
                     }
 
@@ -279,7 +287,7 @@ public class ChunkIntegrityValidator implements AutoCloseable {
                     }
                     
                     lastValidationTime.put(chunkIndex, System.currentTimeMillis());
-                    return new IntegrityReport(chunkX, chunkZ, result, message, data.length);
+                    return new IntegrityReport(chunkX, chunkZ, result, message, currentData.length);
                     
                 } catch (Exception e) {
                     return new IntegrityReport(chunkX, chunkZ, ValidationResult.CORRUPTED,

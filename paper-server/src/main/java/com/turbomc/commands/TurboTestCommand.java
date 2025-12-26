@@ -20,6 +20,76 @@ import java.util.concurrent.atomic.AtomicLong;
  * @version 2.3.0
  */
 public class TurboTestCommand {
+
+    public static void register(com.mojang.brigadier.CommandDispatcher<net.minecraft.commands.CommandSourceStack> dispatcher) {
+        dispatcher.register(net.minecraft.commands.Commands.literal("turbo")
+            .then(net.minecraft.commands.Commands.literal("test")
+                .requires(source -> source.hasPermission(2, "turbomc.admin.test"))
+                .then(net.minecraft.commands.Commands.literal("chunks")
+                    .then(net.minecraft.commands.Commands.argument("count", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1))
+                        .executes(context -> {
+                            testChunks(context.getSource().getBukkitSender(), com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(context, "count"));
+                            return 1;
+                        })
+                    )
+                )
+                .then(net.minecraft.commands.Commands.literal("gen")
+                    .then(net.minecraft.commands.Commands.argument("radius", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1))
+                        .executes(context -> {
+                            testGeneration(context.getSource().getBukkitSender(), com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(context, "radius"));
+                            return 1;
+                        })
+                    )
+                )
+                .then(net.minecraft.commands.Commands.literal("flight")
+                    .then(net.minecraft.commands.Commands.argument("speed", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1))
+                        .then(net.minecraft.commands.Commands.argument("distance", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1))
+                            .executes(context -> {
+                                testFlight(context.getSource().getBukkitSender(), 
+                                    com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(context, "speed"),
+                                    com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(context, "distance"));
+                                return 1;
+                            })
+                        )
+                    )
+                )
+                .then(net.minecraft.commands.Commands.literal("cache")
+                    .executes(context -> {
+                        testCache(context.getSource().getBukkitSender());
+                        return 1;
+                    })
+                )
+                .then(net.minecraft.commands.Commands.literal("mobs")
+                    .then(net.minecraft.commands.Commands.argument("count", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1))
+                        .then(net.minecraft.commands.Commands.argument("type", com.mojang.brigadier.arguments.StringArgumentType.string())
+                            .executes(context -> {
+                                testMobs(context.getSource().getBukkitSender(), 
+                                    com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(context, "count"),
+                                    com.mojang.brigadier.arguments.StringArgumentType.getString(context, "type"));
+                                return 1;
+                            })
+                        )
+                    )
+                )
+                .then(net.minecraft.commands.Commands.literal("redstone")
+                     .then(net.minecraft.commands.Commands.argument("intensity", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1))
+                        .executes(context -> {
+                            testRedstone(context.getSource().getBukkitSender(), com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(context, "intensity"));
+                            return 1;
+                        })
+                    )
+                )
+                .then(net.minecraft.commands.Commands.literal("physics")
+                     .then(net.minecraft.commands.Commands.argument("count", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1))
+                        .executes(context -> {
+                            testPhysics(context.getSource().getBukkitSender(), com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(context, "count"));
+                            return 1;
+                        })
+                    )
+                )
+            )
+        );
+    }
     
     public static void testChunks(CommandSender sender, int count) {
         if (!(sender instanceof Player)) {

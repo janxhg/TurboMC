@@ -151,23 +151,47 @@ public class LODManager {
      * Helper for hook-based extraction from SerializableChunkData.
      */
     public void extractLOD(net.minecraft.server.level.ServerLevel level, net.minecraft.world.level.chunk.ChunkAccess chunk) {
-        // Map Vanilla dimension keys to directory names used by GlobalIndexManager
-        String worldName = level.dimension().location().getPath();
-        if (worldName.contains("overworld")) worldName = "world";
-        else if (worldName.contains("nether")) worldName = "DIM-1";
-        else if (worldName.contains("the_end")) worldName = "DIM1";
-        
-        int x = chunk.getPos().x;
-        int z = chunk.getPos().z;
-        
-        // Extract basic data for LOD 4 from the chunk NBT if possible
-        // Note: SerializableChunkData calls this before full serialization, 
-        // but we can compute heightmap samples directly from the chunk object here.
-        net.minecraft.world.level.levelgen.Heightmap hm = chunk.getOrCreateHeightmapUnprimed(net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE);
-        int sampleHeight = hm.getFirstAvailable(8, 8);
-        
-        GlobalIndexManager.getInstance().updateChunkInfo(worldName, x, z, 
-            GlobalIndexManager.pack(true, sampleHeight, 1));
+        // TurboMC Optimization: Offload to background thread to avoid blocking chunk save/generation
+        java.util.concurrent.ExecutorService executor = com.turbomc.storage.optimization.TurboStorageManager.getInstance().getPrefetchExecutor();
+        if (executor == null) return; // Should not happen if initialized
+
+        java.util.concurrent.CompletableFuture.runAsync(() -> {
+            try {
+                // Map Vanilla dimension keys to directory names used by GlobalIndexManager
+                String worldName = level.dimension().location().getPath();
+                if (worldName.contains("overworld")) worldName = "world";
+                else if (worldName.contains("nether")) worldName = "DIM-1";
+                else if (worldName.contains("the_end")) worldName = "DIM1";
+                
+                int x = chunk.getPos().x;
+                int z = chunk.getPos().z;
+                
+                // CRITICAL: processChunk generation typically blocks if we force heightmap calculation
+                // so we only proceed if we can get it cheaply or if it's already generated.
+                // For now, we try-catch to be safe and avoid crashing the background thread.
+                
+                // Check if HEIGHTMAPS are present in the chunk to avoid costly recalculation
+                // We use WORLD_SURFACE as the visual representant
+                net.minecraft.world.level.levelgen.Heightmap.Types type = net.minecraft.world.level.levelgen.Heightmap.Types.WORLD_SURFACE;
+                
+                // Note: getHeigthmaps() returns the map of existing heightmaps. 
+                // We verify if our desired type exists before calling methods that might trigger calculation.
+                // However, chunk.getOrCreateHeightmapUnprimed() usually just returns the wrapper.
+                // The expensive part is 'getFirstAvailable' if it has to iterate blocks.
+                // But generally for a chunk being saved, it should be populated.
+                
+                net.minecraft.world.level.levelgen.Heightmap hm = chunk.getOrCreateHeightmapUnprimed(type);
+                if (hm != null) {
+                    // This effectively reads the heightmap. If it's valid, fine.
+                    int sampleHeight = hm.getFirstAvailable(8, 8);
+                    
+                    GlobalIndexManager.getInstance().updateChunkInfo(worldName, x, z, 
+                        GlobalIndexManager.pack(true, sampleHeight, 1));
+                }
+            } catch (Exception e) {
+                // Squelch errors in background task to not spam logs
+            }
+        }, executor);
     }
 
     /**

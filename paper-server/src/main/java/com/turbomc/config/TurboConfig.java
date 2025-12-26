@@ -371,6 +371,15 @@ pregeneration-distance = 48
 # Smart pre-detection: check if chunk exists before player arrives
 smart-predetection = true
 
+# HyperView (Infinite Loading) Configuration (v2.3.3)
+# Scans a large radius around players to pre-generate chunks
+hyperview-enabled = true
+hyperview-radius = 32
+
+[autopilot]
+# Turbo Autopilot: Automatically adjusts performance based on load
+enabled = true
+
 [version-control]
 # Minimum Minecraft version allowed to connect (e.g., "1.20.1")
 minimum-version = "1.20.1"
@@ -847,5 +856,22 @@ highlight-corrupted = true
     
     public static int getGenerationThreads() {
         return getInstance().getInt("chunk.generation-threads", 0);
+    }
+    
+    public static boolean isHyperViewEnabled() {
+        return getInstance().getBoolean("world.generation.hyperview-enabled", 
+               getInstance().getBoolean("hyperview-enabled", true));
+    }
+    
+    public static int getHyperViewRadius() {
+        if (getInstance().getBoolean("autopilot.enabled", true)) {
+            return com.turbomc.core.autopilot.TurboAutopilot.getInstance().getEffectiveHyperViewRadius();
+        }
+        return getRawHyperViewRadius();
+    }
+
+    public static int getRawHyperViewRadius() {
+        return getInstance().getInt("world.generation.hyperview-radius", 
+               getInstance().getInt("hyperview-radius", 32));
     }
 }

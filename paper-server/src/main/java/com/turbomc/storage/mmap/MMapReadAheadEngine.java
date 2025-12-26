@@ -192,7 +192,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
         }
         
         resource.acquire();
-        this.flushBarrier = new FlushBarrier(false); // Non-verbose synchronization
+        this.flushBarrier = resource.getFlushBarrier();
         initializeFileMapping();
         startMaintenanceTasks();
     }
@@ -259,29 +259,39 @@ public class MMapReadAheadEngine implements AutoCloseable {
             }
             cached.updateLastAccess();
             
-            // PROACTIVE: Trigger prefetch on hits too! 
-            // This ensures we keep moving ahead of the player even if they hit cached chunks.
-            triggerPrefetch(chunkX, chunkZ);
-            
-            return cached.getData();
+            flushBarrier.beforeRead();
+            try {
+                // PROACTIVE: Trigger prefetch on hits too! 
+                // This ensures we keep moving ahead of the player even if they hit cached chunks.
+                triggerPrefetch(chunkX, chunkZ);
+                
+                return cached.getData();
+            } finally {
+                flushBarrier.afterRead(null);
+            }
         }
         
         recentMisses.incrementAndGet();
         cacheMisses.incrementAndGet();
         
-        // Read chunk from file
-        byte[] data = readChunkDirect(chunkX, chunkZ);
-        if (data == null) {
-            return null;
+        flushBarrier.beforeRead();
+        try {
+            // Read chunk from file
+            byte[] data = readChunkDirect(chunkX, chunkZ);
+            if (data == null) {
+                return null;
+            }
+            
+            // Cache the chunk
+            cacheChunk(chunkIndex, data);
+            
+            // Trigger prefetch for nearby chunks
+            triggerPrefetch(chunkX, chunkZ);
+            
+            return data;
+        } finally {
+            flushBarrier.afterRead(mappedBuffer);
         }
-        
-        // Cache the chunk
-        cacheChunk(chunkIndex, data);
-        
-        // Trigger prefetch for nearby chunks
-        triggerPrefetch(chunkX, chunkZ);
-        
-        return data;
     }
     
     /**
@@ -573,22 +583,28 @@ public class MMapReadAheadEngine implements AutoCloseable {
                 boolean virtualized = lodManager.shouldVirtualizedPrefetch(centerX, centerZ, targetX, targetZ);
                 
                 try {
-                    if (virtualized) {
-                        // Virtual prefetch (LOD 0/3/4) - Just warm the mapping
-                        readChunkDirect(targetX, targetZ);
-                    } else {
-                        byte[] data = readChunkDirect(targetX, targetZ);
-                        if (data != null) {
-                            // Speculative validation before caching (v2.4.1)
-                            com.turbomc.storage.optimization.TurboStorageManager.getInstance()
-                                .validateSpeculative(regionPath, targetX, targetZ, data)
-                                .thenAccept(report -> {
-                                    if (report.isValid()) {
-                                        int chunkIndex = LRFConstants.getChunkIndex(targetX & 31, targetZ & 31);
-                                        cacheChunk(chunkIndex, data, true);
-                                    }
-                                });
+                    // Enforce barrier for prefetch reads too
+                    flushBarrier.beforeRead();
+                    try {
+                        if (virtualized) {
+                            // Virtual prefetch (LOD 0/3/4) - Just warm the mapping
+                            readChunkDirect(targetX, targetZ);
+                        } else {
+                            byte[] data = readChunkDirect(targetX, targetZ);
+                            if (data != null) {
+                                // Speculative validation before caching (v2.4.1)
+                                com.turbomc.storage.optimization.TurboStorageManager.getInstance()
+                                    .validateSpeculative(regionPath, targetX, targetZ, data)
+                                    .thenAccept(report -> {
+                                        if (report.isValid()) {
+                                            int chunkIndex = LRFConstants.getChunkIndex(targetX & 31, targetZ & 31);
+                                            cacheChunk(chunkIndex, data, true);
+                                        }
+                                    });
+                            }
                         }
+                    } finally {
+                        flushBarrier.afterRead(mappedBuffer);
                     }
                 } catch (IOException e) {
                     // Ignore prefetch errors
@@ -652,7 +668,13 @@ public class MMapReadAheadEngine implements AutoCloseable {
                         int[] coords = allChunks.get(j);
                         try {
                             // Ultra pre-chunking is ALWAYS virtualized (LOD 3)
-                            readChunkDirect(coords[0], coords[1]);
+                            // v2.4.1 Fix: Use flushBarrier for synchronization even during ultra-scan
+                            flushBarrier.beforeRead();
+                            try {
+                                readChunkDirect(coords[0], coords[1]);
+                            } finally {
+                                flushBarrier.afterRead(mappedBuffer);
+                            }
                         } catch (IOException ignored) {}
                     }
                 });

@@ -18,6 +18,18 @@ import java.lang.management.MemoryUsage;
  * @version 2.3.0
  */
 public class TurboStatsCommand {
+
+    public static void register(com.mojang.brigadier.CommandDispatcher<net.minecraft.commands.CommandSourceStack> dispatcher) {
+        dispatcher.register(net.minecraft.commands.Commands.literal("turbo")
+            .then(net.minecraft.commands.Commands.literal("stats")
+                .requires(source -> source.hasPermission(2, "turbomc.command.stats"))
+                .executes(context -> {
+                    execute(context.getSource().getBukkitSender());
+                    return 1;
+                })
+            )
+        );
+    }
     
     public static void execute(CommandSender sender) {
         sender.sendMessage("§6╔═══════════════════════════════════════════╗");
@@ -118,6 +130,9 @@ public class TurboStatsCommand {
                             int pending = extractInt(line, "pending=");
                             sender.sendMessage("§6║   §7Pending: §e" + pending);
                         }
+                    } else if (line.contains("HyperView Radius:")) {
+                        String radius = line.split(":")[1].trim();
+                        sender.sendMessage("§6║   §7Radius: §b" + radius + " §7chunks");
                     }
                 }
             }

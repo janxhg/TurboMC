@@ -45,8 +45,11 @@ public final class TurboCommandRegistry {
         TurboInspectorCommand.register(dispatcher);
         
         // Future commands can be registered here
-        // TurboPerformanceCommand.register(dispatcher);
-        // TurboConfigCommand.register(dispatcher);
+         TurboGenerationCommand.register(dispatcher);
+        TurboHyperViewCommand.register(dispatcher); // v2.3.3 HyperView
+        TurboStatsCommand.register(dispatcher);
+        TurboTestCommand.register(dispatcher);
+        TurboHyperViewCommand.register(dispatcher); // v2.3.3 HyperView
         
         System.out.println("[TurboMC][Commands] Registered " + getCommandCount() + " commands");
     }
@@ -171,6 +174,19 @@ public final class TurboCommandRegistry {
                              sendOVFUsage(sender);
                         }
                         return true;
+                    case "hyperview":
+                        if (args.length < 2) {
+                            sender.sendMessage("§cUsage: /turbo hyperview <radius> [world]");
+                            return true;
+                        }
+                        try {
+                            int radius = Integer.parseInt(args[1]);
+                            String world = args.length > 2 ? args[2] : null;
+                            TurboHyperViewCommand.execute(sender, radius, world);
+                        } catch (NumberFormatException e) {
+                            sender.sendMessage("§cInvalid radius. Must be a number.");
+                        }
+                        return true;
                     default:
                         sendUsage(sender);
                         return true;
@@ -184,7 +200,7 @@ public final class TurboCommandRegistry {
                 }
                 
                 if (args.length == 1) {
-                    return Arrays.asList("stats", "test", "gen", "storage", "inspect", "ovf");
+                    return Arrays.asList("stats", "test", "gen", "storage", "inspect", "ovf", "hyperview");
                 }
                 
                 String subCommand = args[0].toLowerCase();
@@ -251,6 +267,7 @@ public final class TurboCommandRegistry {
         sender.sendMessage("§e/turbo stats §7- Show server performance & dashboard");
         sender.sendMessage("§e/turbo test ... §7- Run mass tests & simulations");
         sender.sendMessage("§e/turbo gen ... §7- Manage parallel chunk generation");
+        sender.sendMessage("§e/turbo input <radius> §7- Manage HyperView (Infinite Loading)");
         sender.sendMessage("§e/turbo storage ... §7- Storage management commands");
         sender.sendMessage("§e/turbo inspect ... §7- Inspector tools");
         sender.sendMessage("§e/turbo ovf ... §7- OVF conversion tools");

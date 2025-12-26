@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
 import com.turbomc.storage.lrf.LRFHeader;
 import com.turbomc.storage.lrf.LRFConstants;
+import com.turbomc.storage.mmap.FlushBarrier;
 
 /**
  * Shared resource management for a single region file.
@@ -21,6 +22,7 @@ public class SharedRegionResource implements AutoCloseable {
     private final FileChannel channel;
     private final AtomicInteger refCount;
     private volatile MappedByteBuffer mappedBuffer;
+    private final FlushBarrier flushBarrier;
     private final Object mmapLock = new Object();
     
     // Header caching for performance
@@ -35,6 +37,7 @@ public class SharedRegionResource implements AutoCloseable {
         this.file = new RandomAccessFile(path.toFile(), "rw");
         this.channel = file.getChannel();
         this.refCount = new AtomicInteger(1);
+        this.flushBarrier = new FlushBarrier(false);
     }
     
     public void acquire() {
@@ -47,6 +50,10 @@ public class SharedRegionResource implements AutoCloseable {
     
     public Path getPath() {
         return path;
+    }
+    
+    public FlushBarrier getFlushBarrier() {
+        return flushBarrier;
     }
     
     public MappedByteBuffer getOrCreateMappedBuffer(long size) throws IOException {

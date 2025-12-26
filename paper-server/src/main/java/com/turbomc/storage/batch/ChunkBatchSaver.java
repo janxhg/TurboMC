@@ -126,7 +126,7 @@ public class ChunkBatchSaver implements AutoCloseable {
         this.chunksCompressed = new AtomicInteger(0);
         this.inflightChunks = new ConcurrentHashMap<>();
         this.startTime = System.currentTimeMillis();
-        this.flushBarrier = new com.turbomc.storage.mmap.FlushBarrier(false); // Non-verbose
+        this.flushBarrier = resource.getFlushBarrier();
         
         if (LRFRegionWriter.isVerbose()) {
             System.out.println("[TurboMC] ChunkBatchSaver initialized (SharedPools): " + regionPath.getFileName() +
@@ -171,7 +171,7 @@ public class ChunkBatchSaver implements AutoCloseable {
         this.inflightChunks = new ConcurrentHashMap<>();
         this.startTime = System.currentTimeMillis();
         this.isSharedPool = false;
-        this.flushBarrier = new com.turbomc.storage.mmap.FlushBarrier(false);
+        this.flushBarrier = resource.getFlushBarrier();
     }
     
     /**
