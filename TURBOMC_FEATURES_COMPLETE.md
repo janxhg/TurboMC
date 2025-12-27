@@ -5,6 +5,33 @@ Versión 2.3.4 | Java 21+ | PaperMC Fork Optimizado
 ===============================================================================
 
 
+v2.3.8
+1. Integración con TurboAutopilot
+TurboAutopilot.java enhanced con hardware profiling
+Dynamic config integration en tick() automático
+Nuevos métodos para control dinámico
+2. Hardware Detection & Auto-Adjustment
+TurboHardwareProfiler: CPU, memoria, performance tiers
+TurboDynamicConfig: Modes: Conservative/Balanced/Aggressive/Adaptive
+Auto-adjustment cada 30s basado en presión del sistema
+3. Config Management Bug Fix
+TurboConfig.java: Validación de integridad
+Auto-regeneración de .toml si falta/corrupto
+Fase 5 sections en configuración default
+4. Storage Manager Integration
+Hardware-aware thread sizing en TurboStorageManager
+Dynamic configuration aplicada automáticamente
+Memory pressure handling con reducción automática
+Build Exitoso ✓
+Compilación: Sin errores
+Integración: Completa con sistemas existentes
+Todas las Fases Principales Completadas ✓
+Fase 1: Thread Pool Consolidation ✓
+Fase 2: Memory Management ✓
+Fase 3: Unified Chunk Queue ✓
+Fase 4: I/O Optimization ✓
+Fase 5: Dynamic Configuration ✓
+
 v2.3.7
 1. LRFRegionWriter.java - StampedLock
 Reemplazo de synchronized blocks:

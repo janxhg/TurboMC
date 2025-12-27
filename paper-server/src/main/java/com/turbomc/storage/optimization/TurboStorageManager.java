@@ -1,6 +1,8 @@
 package com.turbomc.storage.optimization;
 
 import com.turbomc.config.TurboConfig;
+import com.turbomc.core.autopilot.TurboHardwareProfiler;
+import com.turbomc.core.autopilot.TurboDynamicConfig;
 import com.turbomc.storage.integrity.ChunkIntegrityValidator.ChecksumAlgorithm;
 import com.turbomc.storage.batch.ChunkBatchLoader;
 import com.turbomc.storage.batch.ChunkBatchSaver;
@@ -46,6 +48,10 @@ public class TurboStorageManager implements AutoCloseable {
     // Unified Chunk Queue integration
     private final UnifiedChunkQueue unifiedQueue;
     
+    // Dynamic Configuration integration (Fase 5)
+    private final TurboHardwareProfiler hardwareProfiler;
+    private final TurboDynamicConfig dynamicConfig;
+    
     // Configuration
     private final TurboConfig config;
     private final AtomicBoolean isInitialized;
@@ -88,6 +94,8 @@ public class TurboStorageManager implements AutoCloseable {
         this.integrityValidators = new ConcurrentHashMap<>();
         this.sharedResources = new ConcurrentHashMap<>();
         this.unifiedQueue = UnifiedChunkQueue.getInstance();
+        this.hardwareProfiler = TurboHardwareProfiler.getInstance();
+        this.dynamicConfig = TurboDynamicConfig.getInstance();
         this.isInitialized = new AtomicBoolean(false);
         this.isClosed = new AtomicBoolean(false);
         
@@ -98,28 +106,44 @@ public class TurboStorageManager implements AutoCloseable {
             
             int processors = Runtime.getRuntime().availableProcessors();
             
-            // FIX: Cap thread counts to prevent explosion on high-core systems
+            // Memory-aware thread sizing using Fase 5 hardware profiler
+            MemoryMonitor memoryMonitor = new MemoryMonitor();
+            double memoryPressure = memoryMonitor.getMemoryPressure();
+            
+            // Get optimal thread counts from hardware profiler
+            int baseLoadThreads = hardwareProfiler.getOptimalThreadCount(0.5);
+            int baseWriteThreads = hardwareProfiler.getOptimalThreadCount(0.25);
+            int baseCompressionThreads = hardwareProfiler.getOptimalThreadCount(0.3);
+            int baseDecompressionThreads = hardwareProfiler.getOptimalThreadCount(0.4);
+            
+            // Apply dynamic configuration adjustments
+            TurboDynamicConfig.AdjustmentMode mode = dynamicConfig.getCurrentMode();
+            double multiplier = mode.multiplier;
+            
             final int MAX_LOAD_THREADS = 32; // Increased to support generation
             final int MAX_WRITE_THREADS = 8;
             final int MAX_COMPRESSION_THREADS = 16;
             final int MAX_DECOMPRESSION_THREADS = 32;
             
-            // Memory-aware thread sizing
-            MemoryMonitor memoryMonitor = new MemoryMonitor();
-            double memoryPressure = memoryMonitor.getMemoryPressure();
-            int baseLoadThreads = Math.max(4, Math.min(config.getInt("storage.batch.global-load-threads", processors / 2), MAX_LOAD_THREADS));
+            int loadThreads = Math.max(4, Math.min(baseLoadThreads, MAX_LOAD_THREADS * 2));
+            int writeThreads = Math.max(2, Math.min(baseWriteThreads, MAX_WRITE_THREADS * 2));
+            int compressionThreads = Math.max(2, Math.min(baseCompressionThreads, MAX_COMPRESSION_THREADS * 2));
+            int decompressionThreads = Math.max(4, Math.min(baseDecompressionThreads, MAX_DECOMPRESSION_THREADS * 2));
+            
+            // Apply memory pressure reduction
             if (memoryPressure > 0.8) {
-                baseLoadThreads = Math.max(2, baseLoadThreads / 2); // Reduce threads under memory pressure
-                System.out.println("[TurboMC][Storage] Memory pressure detected, reducing load threads to " + baseLoadThreads);
+                loadThreads = Math.max(2, loadThreads / 2);
+                writeThreads = Math.max(1, writeThreads / 2);
+                compressionThreads = Math.max(1, compressionThreads / 2);
+                decompressionThreads = Math.max(2, decompressionThreads / 2);
             }
             
-            // Scalable thread pool sizes with caps - increased for generation support
-            int loadThreads = baseLoadThreads;
-            int writeThreads = Math.max(1, Math.min(config.getInt("storage.batch.global-save-threads", processors / 8), MAX_WRITE_THREADS));
-            int compressionThreads = Math.max(2, Math.min(config.getInt("storage.batch.global-compression-threads", processors / 2), MAX_COMPRESSION_THREADS));
-            int decompressionThreads = Math.max(2, Math.min(config.getInt("storage.batch.global-decompression-threads", processors / 2), MAX_COMPRESSION_THREADS));
+            System.out.println("[TurboMC][TurboStorageManager] Dynamic thread sizing: " +
+                             "load=" + loadThreads + ", write=" + writeThreads + 
+                             ", compression=" + compressionThreads + ", decompression=" + decompressionThreads +
+                             " (mode: " + mode.name + ", memory pressure: " + String.format("%.2f", memoryPressure) + ")");
             
-            // FIX: Create daemon threads to allow JVM shutdown
+            // Create daemon threads to allow JVM shutdown
             this.globalLoadExecutor = java.util.concurrent.Executors.newFixedThreadPool(loadThreads, r -> {
                 Thread t = new Thread(r, "Turbo-Global-LoadPool");
                 t.setDaemon(true);  // CRITICAL: Allow JVM to shutdown

@@ -33,12 +33,22 @@ public class TurboConfig {
         
         // Try to load from turbo.toml first, fallback to paper-global.yml
         if (configFile.exists()) {
-            this.toml = new Toml().read(configFile);
-            System.out.println("[TurboMC][CFG] Loaded configuration from turbo.toml");
+            // Fase 5: Validate config file integrity
+            if (isValidConfigFile(configFile)) {
+                this.toml = new Toml().read(configFile);
+                System.out.println("[TurboMC][CFG] Loaded configuration from turbo.toml");
+            } else {
+                System.err.println("[TurboMC][CFG] Invalid or corrupted turbo.toml detected. Regenerating...");
+                createDefaultConfig();
+                this.toml = new Toml().read(configFile);
+                System.out.println("[TurboMC][CFG] Regenerated and loaded configuration from turbo.toml");
+            }
         } else {
-            // Fallback to YAML
-            this.toml = loadFromYaml();
-            System.out.println("[TurboMC][CFG] Loaded configuration from paper-global.yml (turbo.toml not found)");
+            // Fase 5: Auto-generate config if missing
+            System.out.println("[TurboMC][CFG] turbo.toml not found. Auto-generating default configuration...");
+            createDefaultConfig();
+            this.toml = new Toml().read(configFile);
+            System.out.println("[TurboMC][CFG] Generated and loaded configuration from turbo.toml");
         }
         
         // Adjust Moonrise worker threads based on config
@@ -115,6 +125,31 @@ public class TurboConfig {
     
     public static boolean isInitialized() {
         return instance != null;
+    }
+    
+    /**
+     * Fase 5: Validate config file integrity
+     */
+    private boolean isValidConfigFile(File file) {
+        try {
+            // Check file size (should not be empty)
+            if (file.length() == 0) {
+                return false;
+            }
+            
+            // Try to parse as TOML
+            new Toml().read(file);
+            
+            // Check for essential sections
+            Toml testToml = new Toml().read(file);
+            return testToml.contains("compression") || 
+                   testToml.contains("storage") || 
+                   testToml.contains("world");
+            
+        } catch (Exception e) {
+            System.err.println("[TurboMC][CFG] Config validation failed: " + e.getMessage());
+            return false;
+        }
     }
     
     private void createDefaultConfig() {
@@ -375,6 +410,43 @@ smart-predetection = true
 # Scans a large radius around players to pre-generate chunks
 hyperview-enabled = true
 hyperview-radius = 32
+
+# Unified Chunk Queue Configuration (Fase 3)
+[storage.unified]
+# Habilitar cola unificada de chunks
+enabled = true
+
+# Tamaño máximo de la cola
+max-queue-size = 10000
+
+# Máximo de tareas concurrentes
+max-concurrent-tasks = 64
+
+# Habilitar deduplicación automática
+enable-deduplication = true
+
+# Dynamic Configuration (Fase 5)
+[storage.dynamic]
+# Habilitar configuración dinámica basada en hardware
+enabled = true
+
+# Modo de ajuste: conservative, balanced, aggressive, adaptive
+adjustment-mode = "adaptive"
+
+# Intervalo de ajuste en segundos
+adjustment-interval-seconds = 30
+
+# Intervalo de refresh de hardware profile en segundos
+profile-refresh-interval-seconds = 60
+
+# Umbrales de presión
+memory-pressure-high = 0.85
+memory-pressure-low = 0.4
+cpu-pressure-high = 0.8
+cpu-pressure-low = 0.3
+
+# Auto-aplicar configuración optimizada
+auto-apply-optimized = false
 
 [autopilot]
 # Turbo Autopilot: Automatically adjusts performance based on load

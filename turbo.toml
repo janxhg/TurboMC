@@ -409,3 +409,27 @@ max-concurrent-tasks = 64
 
 # Habilitar deduplicación automática
 enable-deduplication = true
+
+[storage.dynamic]
+# Configuración Dinámica (Fase 5)
+
+# Habilitar configuración dinámica basada en hardware
+enabled = true
+
+# Modo de ajuste: conservative, balanced, aggressive, adaptive
+adjustment-mode = "adaptive"
+
+# Intervalo de ajuste en segundos
+adjustment-interval-seconds = 30
+
+# Intervalo de refresh de hardware profile en segundos
+profile-refresh-interval-seconds = 60
+
+# Umbrales de presión
+memory-pressure-high = 0.85
+memory-pressure-low = 0.4
+cpu-pressure-high = 0.8
+cpu-pressure-low = 0.3
+
+# Auto-aplicar configuración optimizada
+auto-apply-optimized = false
