@@ -394,3 +394,18 @@ include-config = true
 
 # Incluir datos de caché en backup
 include-cache = false
+
+[storage.unified]
+# Configuración de Unified Chunk Queue (Fase 3)
+
+# Habilitar cola unificada de chunks
+enabled = true
+
+# Tamaño máximo de la cola
+max-queue-size = 10000
+
+# Máximo de tareas concurrentes
+max-concurrent-tasks = 64
+
+# Habilitar deduplicación automática
+enable-deduplication = true

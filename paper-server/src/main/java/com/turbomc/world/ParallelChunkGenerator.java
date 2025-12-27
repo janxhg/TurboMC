@@ -6,6 +6,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import com.turbomc.config.TurboConfig;
+import com.turbomc.storage.optimization.UnifiedChunkQueue;
 import com.turbomc.storage.optimization.TurboStorageManager;
 
 import java.util.concurrent.*;
@@ -38,6 +39,9 @@ public class ParallelChunkGenerator {
     private final int pregenerationDistance;
     private final boolean smartPredetection;
     
+    // Unified Chunk Queue integration
+    private final UnifiedChunkQueue unifiedQueue;
+    
     // Statistics
     private final AtomicInteger chunksGenerated = new AtomicInteger(0);
     private final AtomicInteger chunksPregenerated = new AtomicInteger(0);
@@ -46,11 +50,9 @@ public class ParallelChunkGenerator {
     
     public ParallelChunkGenerator(ServerLevel world, TurboConfig config) {
         this.world = world;
-        // Moved to lazy getter to avoid NPE during world initialization
         this.startTime = System.currentTimeMillis();
         this.storageManager = TurboStorageManager.getInstance();
-        
-        // Load configuration
+        this.unifiedQueue = UnifiedChunkQueue.getInstance();
         this.enabled = config.getBoolean("world.generation.parallel-enabled", true);
         int threads = config.getInt("world.generation.generation-threads", 0);
         if (threads <= 0) {

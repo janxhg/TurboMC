@@ -43,6 +43,9 @@ public class TurboStorageManager implements AutoCloseable {
     private final ConcurrentHashMap<Path, ChunkIntegrityValidator> integrityValidators;
     private final ConcurrentHashMap<Path, SharedRegionResource> sharedResources;
     
+    // Unified Chunk Queue integration
+    private final UnifiedChunkQueue unifiedQueue;
+    
     // Configuration
     private final TurboConfig config;
     private final AtomicBoolean isInitialized;
@@ -84,6 +87,7 @@ public class TurboStorageManager implements AutoCloseable {
         this.regionReaders = new ConcurrentHashMap<>();
         this.integrityValidators = new ConcurrentHashMap<>();
         this.sharedResources = new ConcurrentHashMap<>();
+        this.unifiedQueue = UnifiedChunkQueue.getInstance();
         this.isInitialized = new AtomicBoolean(false);
         this.isClosed = new AtomicBoolean(false);
         
