@@ -689,11 +689,12 @@ public class TurboRegionFileStorage extends RegionFileStorage {
         }
 
         if (java.nio.file.Files.exists(lrfRegionPath)) {
-            // Read from LRF via StorageManager
+            // Read from LRF via StorageManager with timeout handling
             CompletableFuture<LRFChunkEntry> future = TurboStorageManager.getInstance().loadChunk(lrfRegionPath, chunkX, chunkZ);
             
             try {
-                LRFChunkEntry chunk = future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+                // Increased timeout from 5s to 10s for better reliability
+                LRFChunkEntry chunk = future.get(10, java.util.concurrent.TimeUnit.SECONDS);
                 if (chunk == null || chunk.getData().length == 0) {
                     return new ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData(
                         ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData.ReadResult.NO_DATA, null, null, 0
@@ -712,9 +713,15 @@ public class TurboRegionFileStorage extends RegionFileStorage {
                 return new ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData(
                     ca.spottedleaf.moonrise.patches.chunk_system.io.MoonriseRegionFileIO.RegionDataController.ReadData.ReadResult.SYNC_READ, null, tag, 0
                 );
+            } catch (java.util.concurrent.TimeoutException te) {
+                System.err.println("[TurboMC][RegionStorage] Timeout loading chunk [" + chunkX + ", " + chunkZ + "] from LRF, falling back to vanilla");
+                // Fallback to vanilla storage instead of returning error
+                return super.moonrise$readData(chunkX, chunkZ);
             } catch (Exception e) {
                 String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
                 System.err.println("[TurboMC][RegionStorage] Error in moonrise$readData Turbo path for [" + chunkX + ", " + chunkZ + "]: " + errorMsg);
+                // Fallback to vanilla storage on any error
+                return super.moonrise$readData(chunkX, chunkZ);
             }
         }
 

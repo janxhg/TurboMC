@@ -55,7 +55,7 @@ public class TurboWorldManager {
             ParallelChunkGenerator gen = new ParallelChunkGenerator(world, config);
             
             // Auto-start prefetcher if HyperView is enabled
-            if (config.getBoolean("world.generation.hyperview-enabled", true)) {
+            if (config.getBoolean("hyperview-enabled", false)) {
                 ChunkPrefetcher prefetcher = new ChunkPrefetcher(world, gen);
                 prefetchers.put(worldName, prefetcher);
                 prefetcher.start();

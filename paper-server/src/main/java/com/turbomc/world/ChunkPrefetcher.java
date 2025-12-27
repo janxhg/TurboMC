@@ -47,7 +47,7 @@ public class ChunkPrefetcher {
     public ChunkPrefetcher(ServerLevel world, ParallelChunkGenerator generator) {
         this.world = world;
         this.generator = generator;
-        this.radius.set(TurboConfig.getInstance().getInt("world.generation.hyperview-radius", 32));
+        this.radius.set(TurboConfig.getInstance().getInt("hyperview-radius", 32));
         
         // Use shared prefetch executor instead of creating own thread
         this.prefetchExecutor = Executors.newSingleThreadScheduledExecutor(r -> {

@@ -64,7 +64,7 @@ public class LRFRegionFileAdapter extends RegionFile {
         TurboStorageManager manager = TurboStorageManager.getInstance();
         try {
             CompletableFuture<LRFChunkEntry> future = manager.loadChunk(filePath, chunkX, chunkZ);
-            LRFChunkEntry chunk = future.get(5, java.util.concurrent.TimeUnit.SECONDS);
+            LRFChunkEntry chunk = future.get(10, java.util.concurrent.TimeUnit.SECONDS); // Increased timeout
             
             if (chunk == null || chunk.getData().length == 0) {
                 return null;
@@ -89,6 +89,15 @@ public class LRFRegionFileAdapter extends RegionFile {
             }
             
             return new DataInputStream(new ByteArrayInputStream(data));
+        } catch (java.util.concurrent.TimeoutException te) {
+            System.err.println("[TurboMC][LRFAdapter] Timeout loading chunk " + chunkPos + " from LRF, falling back to vanilla");
+            // Fallback to legacy sync read on timeout
+            try {
+                return super.getChunkDataInputStream(chunkPos);
+            } catch (Exception e2) {
+                System.err.println("[TurboMC][LRFAdapter] Vanilla fallback failed for " + chunkPos + ": " + e2.getMessage());
+                return null;
+            }
         } catch (Exception e) {
             String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
             System.err.println("[TurboMC][LRFAdapter] Turbo load failed for " + chunkPos + ": " + errorMsg);
