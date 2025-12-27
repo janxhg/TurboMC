@@ -73,6 +73,9 @@ public class TurboChunkLoadingOptimizer {
     // Chunk cache
     private final ConcurrentHashMap<String, ChunkCache> chunkCaches;
     
+    // Memory monitoring
+    private final MemoryMonitor memoryMonitor;
+    
     // Configuration
     private final boolean optimizerEnabled;
     private final boolean preloadingEnabled;
@@ -88,6 +91,7 @@ public class TurboChunkLoadingOptimizer {
         this.totalChunksLoaded = new AtomicLong(0);
         this.totalLoadTime = new AtomicLong(0);
         this.currentLoadingChunks = new AtomicInteger(0);
+        this.memoryMonitor = new MemoryMonitor();
         
         // Load configuration
         TurboConfig config = TurboConfig.getInstance();
@@ -116,6 +120,7 @@ public class TurboChunkLoadingOptimizer {
             System.out.println("  - Caching: " + (cachingEnabled ? "ENABLED" : "DISABLED"));
             System.out.println("  - Priority Loading: " + (priorityLoadingEnabled ? "ENABLED" : "DISABLED"));
             System.out.println("  - Max Memory Usage: " + maxMemoryUsage + "MB");
+            System.out.println("  - Memory Monitor: ENABLED");
         } else {
             System.out.println("[TurboMC][Chunk] Chunk Loading Optimizer initialized (DISABLED - set chunk.optimizer.enabled=true to enable)");
         }
@@ -356,6 +361,16 @@ public class TurboChunkLoadingOptimizer {
         return chunkCaches.computeIfAbsent(worldName, k -> {
             int cacheSize = currentStrategy.getCacheSize();
             if (cacheSize <= 0) cacheSize = 1000;
+            
+            // Memory-aware sizing
+            double memoryPressure = memoryMonitor.getMemoryPressure();
+            if (memoryPressure > 0.8) {
+                cacheSize = (int) (cacheSize * 0.5); // Reduce size under pressure
+                System.out.println("[TurboMC][Chunk] Memory pressure detected (" + 
+                    String.format("%.1f%%", memoryPressure * 100) + 
+                    "), reducing cache size to " + cacheSize);
+            }
+            
             return new ChunkCache(cacheSize);
         });
     }
@@ -381,11 +396,14 @@ public class TurboChunkLoadingOptimizer {
         
         return new ChunkLoadingStats(
             currentStrategy,
-            totalChunks,
-            avgLoadTime,
+            totalChunksLoaded.get(),
+            totalChunksLoaded.get() > 0 ? (double) totalLoadTime.get() / totalChunksLoaded.get() / 1_000_000.0 : 0,
             currentLoadingChunks.get(),
             worldMetrics.size(),
-            optimizationsEnabled.get()
+            optimizationsEnabled.get(),
+            memoryMonitor.getUsedMemoryMB(),
+            memoryMonitor.getMaxMemoryMB(),
+            memoryMonitor.getMemoryPressure()
         );
     }
     
@@ -500,6 +518,28 @@ public class TurboChunkLoadingOptimizer {
     }
     
     /**
+     * Memory monitor for dynamic cache sizing.
+     */
+    private static class MemoryMonitor {
+        public double getMemoryPressure() {
+            Runtime rt = Runtime.getRuntime();
+            long used = rt.totalMemory() - rt.freeMemory();
+            return (double) used / rt.maxMemory();
+        }
+        
+        public long getUsedMemoryMB() {
+            Runtime rt = Runtime.getRuntime();
+            long used = rt.totalMemory() - rt.freeMemory();
+            return used / 1024 / 1024;
+        }
+        
+        public long getMaxMemoryMB() {
+            Runtime rt = Runtime.getRuntime();
+            return rt.maxMemory() / 1024 / 1024;
+        }
+    }
+    
+    /**
      * Chunk loading statistics summary.
      */
     public static class ChunkLoadingStats {
@@ -509,16 +549,22 @@ public class TurboChunkLoadingOptimizer {
         private final int currentlyLoading;
         private final int trackedWorlds;
         private final boolean optimizationsEnabled;
+        private final long usedMemoryMB;
+        private final long maxMemoryMB;
+        private final double memoryPressure;
         
         public ChunkLoadingStats(LoadingStrategy currentStrategy, long totalChunksLoaded, 
                                double averageLoadTime, int currentlyLoading, int trackedWorlds, 
-                               boolean optimizationsEnabled) {
+                               boolean optimizationsEnabled, long usedMemoryMB, long maxMemoryMB, double memoryPressure) {
             this.currentStrategy = currentStrategy;
             this.totalChunksLoaded = totalChunksLoaded;
             this.averageLoadTime = averageLoadTime;
             this.currentlyLoading = currentlyLoading;
             this.trackedWorlds = trackedWorlds;
             this.optimizationsEnabled = optimizationsEnabled;
+            this.usedMemoryMB = usedMemoryMB;
+            this.maxMemoryMB = maxMemoryMB;
+            this.memoryPressure = memoryPressure;
         }
         
         public LoadingStrategy getCurrentStrategy() { return currentStrategy; }
@@ -527,11 +573,15 @@ public class TurboChunkLoadingOptimizer {
         public int getCurrentlyLoading() { return currentlyLoading; }
         public int getTrackedWorlds() { return trackedWorlds; }
         public boolean isOptimizationsEnabled() { return optimizationsEnabled; }
+        public long getUsedMemoryMB() { return usedMemoryMB; }
+        public long getMaxMemoryMB() { return maxMemoryMB; }
+        public double getMemoryPressure() { return memoryPressure; }
         
         @Override
         public String toString() {
-            return String.format("ChunkLoadingStats{strategy=%s, loaded=%d, avgTime=%.2fms, loading=%d, worlds=%d, enabled=%s}",
-                currentStrategy.getName(), totalChunksLoaded, averageLoadTime, currentlyLoading, trackedWorlds, optimizationsEnabled);
+            return String.format("ChunkLoadingStats{strategy=%s, loaded=%d, avgTime=%.2fms, loading=%d, worlds=%d, enabled=%s, memory=%d/%dMB (%.1f%%)}",
+                currentStrategy.getName(), totalChunksLoaded, averageLoadTime, currentlyLoading, trackedWorlds, optimizationsEnabled,
+                usedMemoryMB, maxMemoryMB, memoryPressure * 100);
         }
     }
 }

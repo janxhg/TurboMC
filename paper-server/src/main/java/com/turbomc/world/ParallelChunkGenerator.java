@@ -6,6 +6,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import com.turbomc.config.TurboConfig;
+import com.turbomc.storage.optimization.TurboStorageManager;
 
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -28,6 +29,7 @@ public class ParallelChunkGenerator {
     private final ExecutorService generatorExecutor;
     private final PriorityBlockingQueue<GenerationTask> taskQueue;
     private final ConcurrentHashMap<Long, CompletableFuture<ChunkAccess>> pendingGenerations;
+    private final TurboStorageManager storageManager;
     
     // Configuration
     private final boolean enabled;
@@ -46,6 +48,7 @@ public class ParallelChunkGenerator {
         this.world = world;
         // Moved to lazy getter to avoid NPE during world initialization
         this.startTime = System.currentTimeMillis();
+        this.storageManager = TurboStorageManager.getInstance();
         
         // Load configuration
         this.enabled = config.getBoolean("world.generation.parallel-enabled", true);
@@ -58,18 +61,13 @@ public class ParallelChunkGenerator {
         this.pregenerationDistance = config.getInt("world.generation.pregeneration-distance", 24);
         this.smartPredetection = config.getBoolean("world.generation.smart-predetection", true);
         
-        // Initialize executor
-        this.generatorExecutor = Executors.newFixedThreadPool(threads, r -> {
-            Thread t = new Thread(r, "TurboMC-ParallelGen-" + System.currentTimeMillis());
-            t.setDaemon(true);
-            t.setPriority(Thread.NORM_PRIORITY - 1); // Slightly lower priority
-            return t;
-        });
+        // Use shared global executor instead of creating own pool
+        this.generatorExecutor = storageManager.getGlobalExecutor();
         
         this.taskQueue = new PriorityBlockingQueue<>(256);
         this.pendingGenerations = new ConcurrentHashMap<>();
         
-        System.out.println("[TurboMC][ParallelGen] Initialized with " + threads + " worker threads");
+        System.out.println("[TurboMC][ParallelGen] Initialized using shared global executor");
         System.out.println("[TurboMC][ParallelGen] Max concurrent: " + maxConcurrentGenerations + 
                          ", Priority: " + priorityMode + ", Distance: " + pregenerationDistance);
     }
@@ -243,13 +241,15 @@ public class ParallelChunkGenerator {
      */
     public void shutdown() {
         System.out.println("[TurboMC][ParallelGen] Shutting down... Stats: " + getStats());
-        generatorExecutor.shutdown();
+        // Don't shutdown shared executor - it's managed by TurboStorageManager
+        // generatorExecutor.shutdown(); // REMOVED - using shared executor
         try {
-            if (!generatorExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
-                generatorExecutor.shutdownNow();
+            // Wait for pending tasks to complete
+            while (!pendingGenerations.isEmpty()) {
+                Thread.sleep(100);
             }
         } catch (InterruptedException e) {
-            generatorExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
         }
     }
     

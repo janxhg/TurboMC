@@ -1,17 +1,27 @@
 """
 ===============================================================================
 TURBOMC - CARACTERÍSTICAS COMPLETAS IMPLEMENTADAS
-Versión 2.3.4 | Java 21+ | PaperMC Fork Optimizado
+Versión 2.3.5 | Java 21+ | PaperMC Fork Optimizado
 ===============================================================================
 
 # SISTEMA DE RENDIMIENTO Y OPTIMIZACIÓN DINÁMICA
 
-## Dynamic Event Throttling (v2.3.4) [NEW]
+## Parallel Processing Optimization (v2.3.5) [NEW]
+- **Thread Pool Consolidation**: Eliminación de executors redundantes en ParallelChunkGenerator y ChunkPrefetcher.
+- **Shared Global Executor**: Uso unificado de thread pools para reducir sobresuscripción de CPU.
+- **Memory-Aware Sizing**: Ajuste dinámico de thread counts basado en presión de memoria.
+- **LRU Cache Implementation**: Cache de chunks con límite de 50k entradas y cleanup automático.
+- **Dynamic Resource Allocation**: Reducción automática de cache sizes bajo presión de memoria.
+- **Unified Task Coordination**: Preparación para UnifiedChunkQueue (Fase 3).
+
+## Dynamic Event Throttling (v2.3.5) [ENHANCED]
 - EventThrottle: Motor de filtrado inteligente para eventos de alta frecuencia.
 - Health-Aware Skipping: Omisión adaptativa de `PlayerMoveEvent` y `EntityMoveEvent` basada en MSPT.
 - Static Listener Detection: Bypass total del sistema si no hay plugins registrados (zero-cost optimization).
 - Throttling Scales: 3 niveles de agresividad (Healthy, Struggling, Critical).
 - Proprietary Core Hooks: Integración directa en `LivingEntity` y `ServerGamePacketListenerImpl` con marcas de propiedad.
+- **NEW v2.3.5**: Thread Pool Consolidation para reducir overhead de CPU.
+- **NEW v2.3.5**: Memory-aware resource allocation con LRU caching.
 
 # SISTEMA DE ALMACENAMIENTO LRF (LINEAR REGION FORMAT)
 

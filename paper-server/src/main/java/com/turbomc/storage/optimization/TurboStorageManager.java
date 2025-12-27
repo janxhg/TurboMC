@@ -72,6 +72,10 @@ public class TurboStorageManager implements AutoCloseable {
         return globalPrefetchExecutor;
     }
     
+    public ExecutorService getGlobalExecutor() {
+        return globalLoadExecutor;
+    }
+    
     private TurboStorageManager(TurboConfig config) {
         this.config = config;
         this.batchLoaders = new ConcurrentHashMap<>();
@@ -91,13 +95,22 @@ public class TurboStorageManager implements AutoCloseable {
             int processors = Runtime.getRuntime().availableProcessors();
             
             // FIX: Cap thread counts to prevent explosion on high-core systems
-            final int MAX_LOAD_THREADS = 16;
+            final int MAX_LOAD_THREADS = 32; // Increased to support generation
             final int MAX_WRITE_THREADS = 8;
             final int MAX_COMPRESSION_THREADS = 16;
             final int MAX_DECOMPRESSION_THREADS = 32;
             
-            // Scalable thread pool sizes with caps
-            int loadThreads = Math.max(2, Math.min(config.getInt("storage.batch.global-load-threads", processors / 4), MAX_LOAD_THREADS));
+            // Memory-aware thread sizing
+            MemoryMonitor memoryMonitor = new MemoryMonitor();
+            double memoryPressure = memoryMonitor.getMemoryPressure();
+            int baseLoadThreads = Math.max(4, Math.min(config.getInt("storage.batch.global-load-threads", processors / 2), MAX_LOAD_THREADS));
+            if (memoryPressure > 0.8) {
+                baseLoadThreads = Math.max(2, baseLoadThreads / 2); // Reduce threads under memory pressure
+                System.out.println("[TurboMC][Storage] Memory pressure detected, reducing load threads to " + baseLoadThreads);
+            }
+            
+            // Scalable thread pool sizes with caps - increased for generation support
+            int loadThreads = baseLoadThreads;
             int writeThreads = Math.max(1, Math.min(config.getInt("storage.batch.global-save-threads", processors / 8), MAX_WRITE_THREADS));
             int compressionThreads = Math.max(2, Math.min(config.getInt("storage.batch.global-compression-threads", processors / 2), MAX_COMPRESSION_THREADS));
             int decompressionThreads = Math.max(2, Math.min(config.getInt("storage.batch.global-decompression-threads", processors / 2), MAX_COMPRESSION_THREADS));
@@ -564,13 +577,22 @@ public class TurboStorageManager implements AutoCloseable {
         return readAheadEngines.computeIfAbsent(finalPath, path -> {
             try {
                 SharedRegionResource resource = getSharedResource(path);
+                
+                // Memory-aware cache sizing
                 int maxCacheSize = config.getInt("storage.mmap.max-cache-size", 512);
+                MemoryMonitor memoryMonitor = new MemoryMonitor();
+                double memoryPressure = memoryMonitor.getMemoryPressure();
+                if (memoryPressure > 0.7) {
+                    maxCacheSize = (int) (maxCacheSize * (1.0 - memoryPressure));
+                    System.out.println("[TurboMC][Storage] Memory pressure detected, reducing MMap cache size to " + maxCacheSize);
+                }
+                
+                // Get MMap configuration
                 int prefetchDistance = config.getInt("storage.mmap.prefetch-distance", 8);
                 int prefetchBatchSize = config.getInt("storage.mmap.prefetch-batch-size", 32);
-                long maxMemoryUsage = config.getLong("storage.mmap.max-memory-usage", 256) * 1024 * 1024; // MB to bytes
-                
+                long maxMemoryUsage = config.getLong("storage.mmap.max-memory-usage", 512) * 1024 * 1024L;
                 boolean predictive = config.getBoolean("storage.mmap.predictive-enabled", true);
-                int predictionScale = config.getInt("storage.mmap.prediction-scale", 12);
+                int predictionScale = config.getInt("storage.mmap.prediction-scale", 6);
                 
                 return new MMapReadAheadEngine(resource, maxCacheSize, prefetchDistance, 
                                              prefetchBatchSize, maxMemoryUsage, predictive, predictionScale,
@@ -879,6 +901,38 @@ public class TurboStorageManager implements AutoCloseable {
         return readAheadEngines.values().stream()
             .mapToLong(engine -> engine.getCacheHits())
             .sum();
+    }
+    
+    /**
+     * Get total cache hits across all engines (legacy method).
+     */
+    public double getCacheHitRate() {
+        long hits = getCacheHits();
+        long misses = getCacheMisses();
+        long total = hits + misses;
+        return total > 0 ? (double) hits / total * 100 : 0;
+    }
+    
+    /**
+     * Memory monitor for dynamic resource allocation.
+     */
+    private static class MemoryMonitor {
+        public double getMemoryPressure() {
+            Runtime rt = Runtime.getRuntime();
+            long used = rt.totalMemory() - rt.freeMemory();
+            return (double) used / rt.maxMemory();
+        }
+        
+        public long getUsedMemoryMB() {
+            Runtime rt = Runtime.getRuntime();
+            long used = rt.totalMemory() - rt.freeMemory();
+            return used / 1024 / 1024;
+        }
+        
+        public long getMaxMemoryMB() {
+            Runtime rt = Runtime.getRuntime();
+            return rt.maxMemory() / 1024 / 1024;
+        }
     }
     
     /**

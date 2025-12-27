@@ -9,7 +9,7 @@ import com.turbomc.storage.optimization.TurboStorageManager;
 import java.util.Collections;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -32,15 +32,30 @@ public class ChunkPrefetcher {
     private final ParallelChunkGenerator generator;
     
     private final AtomicBoolean running = new AtomicBoolean(false);
-    private final Set<Long> visitedChunks = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private final Set<Long> visitedChunks = Collections.newSetFromMap(
+        new java.util.LinkedHashMap<Long, Boolean>(10000, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(java.util.Map.Entry<Long, Boolean> eldest) {
+                return size() > 50000; // Limitar a 50k chunks
+            }
+        }
+    );
     private final AtomicInteger radius = new AtomicInteger(32); // Default 32 chunks
     
-    private Thread workerThread;
+    private final ScheduledExecutorService prefetchExecutor;
     
     public ChunkPrefetcher(ServerLevel world, ParallelChunkGenerator generator) {
         this.world = world;
         this.generator = generator;
         this.radius.set(TurboConfig.getInstance().getInt("world.generation.hyperview-radius", 32));
+        
+        // Use shared prefetch executor instead of creating own thread
+        this.prefetchExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "TurboMC-HyperView-" + world.dimension().location().getPath());
+            t.setDaemon(true);
+            t.setPriority(Thread.MIN_PRIORITY);
+            return t;
+        });
     }
     
     public void setRadius(int newRadius) {
@@ -56,33 +71,26 @@ public class ChunkPrefetcher {
     public void start() {
         if (running.getAndSet(true)) return;
         
-        workerThread = new Thread(this::runLoop, "TurboMC-HyperView-" + world.dimension().location().getPath());
-        workerThread.setDaemon(true);
-        workerThread.setPriority(Thread.MIN_PRIORITY);
-        workerThread.start();
+        prefetchExecutor.scheduleAtFixedRate(this::processTick, 2000, 2000, TimeUnit.MILLISECONDS);
         LOGGER.info("[TurboMC][HyperView] Started for world " + world.dimension().location() + " with radius " + radius.get());
     }
     
     public void stop() {
         running.set(false);
-        if (workerThread != null) {
-            workerThread.interrupt();
-        }
-    }
-    
-    private void runLoop() {
-        while (running.get()) {
+        if (prefetchExecutor != null) {
+            prefetchExecutor.shutdown();
             try {
-                processTick();
-                Thread.sleep(2000); // Check every 2 seconds
+                if (!prefetchExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    prefetchExecutor.shutdownNow();
+                }
             } catch (InterruptedException e) {
-                break;
-            } catch (Exception e) {
-                LOGGER.warning("[TurboMC][HyperView] Error in loop: " + e.getMessage());
+                prefetchExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
             }
         }
     }
     
+        
     private void processTick() {
         if (world.players().isEmpty()) return;
         
