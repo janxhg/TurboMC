@@ -7,6 +7,8 @@ import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import com.turbomc.storage.lrf.LRFHeader;
 import com.turbomc.storage.lrf.LRFConstants;
 import com.turbomc.storage.mmap.FlushBarrier;
@@ -25,12 +27,13 @@ public class SharedRegionResource implements AutoCloseable {
     private final FlushBarrier flushBarrier;
     private final Object mmapLock = new Object();
     
-    // Header caching for performance
+    // Header caching for performance - Fase 4 optimization
     private volatile LRFHeader cachedHeader;
     private volatile long lastHeaderRefresh;
     private volatile long lastFileModified;
     private volatile long lastFileSize;
-    private final Object headerLock = new Object();
+    private final ReadWriteLock headerLock = new ReentrantReadWriteLock();
+    private volatile long lastHeaderUpdate;
     
     public SharedRegionResource(Path path) throws IOException {
         this.path = path;
@@ -96,13 +99,22 @@ public class SharedRegionResource implements AutoCloseable {
             return header;
         }
         
-        synchronized (headerLock) {
-            // Double-check
+        // Fase 4: ReadWriteLock optimization for header access
+        headerLock.readLock().lock();
+        try {
+            // Double-check with read lock
             header = cachedHeader;
             if (header != null && currentModified <= lastFileModified && 
                 (System.currentTimeMillis() - lastHeaderRefresh < 1000)) {
                 return header;
             }
+        } finally {
+            headerLock.readLock().unlock();
+        }
+        
+        // Upgrade to write lock for header reload
+        headerLock.writeLock().lock();
+        try {
             
             byte[] headerData = new byte[LRFConstants.HEADER_SIZE];
             ByteBuffer headerBuffer = ByteBuffer.wrap(headerData);
@@ -128,7 +140,10 @@ public class SharedRegionResource implements AutoCloseable {
             lastFileModified = currentModified;
             lastFileSize = currentSize;
             lastHeaderRefresh = System.currentTimeMillis();
+            lastHeaderUpdate = System.currentTimeMillis();
             return header;
+        } finally {
+            headerLock.writeLock().unlock();
         }
     }
     
@@ -136,9 +151,14 @@ public class SharedRegionResource implements AutoCloseable {
      * Invalidate the cached header, forcing a re-read on next access.
      */
     public void invalidateHeader() {
-        synchronized (headerLock) {
+        // Fase 4: ReadWriteLock optimization for header invalidation
+        headerLock.writeLock().lock();
+        try {
             cachedHeader = null;
             lastHeaderRefresh = 0;
+            lastHeaderUpdate = System.currentTimeMillis();
+        } finally {
+            headerLock.writeLock().unlock();
         }
     }
 

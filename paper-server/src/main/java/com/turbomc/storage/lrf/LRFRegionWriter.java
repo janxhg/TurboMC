@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.StampedLock;
 import com.turbomc.storage.optimization.SharedRegionResource;
 
 /**
@@ -38,6 +39,9 @@ public class LRFRegionWriter implements AutoCloseable {
     // Streaming support
     private boolean streamingMode;
     private LRFHeader streamingHeader;
+    
+    // StampedLock for Fase 4 I/O optimization
+    private final StampedLock headerLock = new StampedLock();
     
     private static boolean verbose = false;
 
@@ -216,28 +220,42 @@ public class LRFRegionWriter implements AutoCloseable {
             }
         }
         
-        // FIX #4 & #7: Thread-safe with proper alignment padding
+        // Fase 4: StampedLock optimization - replace synchronized blocks
         long currentPos;
-        synchronized (streamingHeader) {  // FIX #4: Sync on header, not channel
-            synchronized (channel) {
-                currentPos = channel.position();
-                
-                // FIX #7: Write padding bytes instead of just seeking
-                if (currentPos % 256 != 0) {
-                    long alignedPos = (currentPos / 256 + 1) * 256;
-                    int paddingSize = (int)(alignedPos - currentPos);
-                    byte[] padding = new byte[paddingSize];
-                    channel.write(ByteBuffer.wrap(padding));
-                    currentPos = alignedPos;
+        long stamp = headerLock.tryOptimisticRead();
+        
+        try {
+            // Try optimistic read first
+            currentPos = channel.position();
+            if (!headerLock.validate(stamp)) {
+                // Fallback to read lock
+                stamp = headerLock.readLock();
+                try {
+                    currentPos = channel.position();
+                } finally {
+                    headerLock.unlockRead(stamp);
                 }
-                
-                if (currentPos < LRFConstants.HEADER_SIZE) {
-                    int paddingSize = (int)(LRFConstants.HEADER_SIZE - currentPos);
-                    byte[] padding = new byte[paddingSize];
-                    channel.write(ByteBuffer.wrap(padding));
-                    currentPos = LRFConstants.HEADER_SIZE;
-                }
-                
+            }
+            
+            // Check alignment and padding
+            if (currentPos % 256 != 0) {
+                long alignedPos = (currentPos / 256 + 1) * 256;
+                int paddingSize = (int)(alignedPos - currentPos);
+                byte[] padding = new byte[paddingSize];
+                channel.write(ByteBuffer.wrap(padding));
+                currentPos = alignedPos;
+            }
+            
+            if (currentPos < LRFConstants.HEADER_SIZE) {
+                int paddingSize = (int)(LRFConstants.HEADER_SIZE - currentPos);
+                byte[] padding = new byte[paddingSize];
+                channel.write(ByteBuffer.wrap(padding));
+                currentPos = LRFConstants.HEADER_SIZE;
+            }
+            
+            // Upgrade to write lock for header modifications
+            stamp = headerLock.writeLock();
+            try {
                 // Write length header (4 bytes) - Total length = 4 + compressedData.length + 1 (compression type)
                 int totalLength = 4 + 1 + compressedData.length;
                 ByteBuffer lengthBuffer = ByteBuffer.allocate(5);
@@ -249,14 +267,22 @@ public class LRFRegionWriter implements AutoCloseable {
                 // Write chunk data with buffer
                 writeWithBuffer(compressedData);
                 
-                // Update streaming header (now inside sync block)
+                // Update streaming header (now inside write lock)
                 streamingHeader.setChunkData(
                     chunk.getChunkX(),
                     chunk.getChunkZ(),
                     (int) currentPos,
                     totalLength
                 );
+            } finally {
+                headerLock.unlockWrite(stamp);
             }
+        } catch (IOException e) {
+            // Ensure lock is released on IOException
+            if (StampedLock.isWriteLockStamp(stamp)) {
+                headerLock.unlockWrite(stamp);
+            }
+            throw e;
         }
         
         // Update statistics
