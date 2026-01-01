@@ -5,6 +5,7 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import com.turbomc.config.TurboConfig;
 import com.turbomc.storage.optimization.TurboStorageManager;
+import com.turbomc.core.autopilot.HealthMonitor;
 
 import java.util.Collections;
 import java.util.Set;
@@ -71,7 +72,7 @@ public class ChunkPrefetcher {
     public void start() {
         if (running.getAndSet(true)) return;
         
-        prefetchExecutor.scheduleAtFixedRate(this::processTick, 2000, 2000, TimeUnit.MILLISECONDS);
+        currentTask = prefetchExecutor.scheduleAtFixedRate(this::processTick, 2000, 2000, TimeUnit.MILLISECONDS);
         LOGGER.info("[TurboMC][HyperView] Started for world " + world.dimension().location() + " with radius " + radius.get());
     }
     
@@ -104,44 +105,76 @@ public class ChunkPrefetcher {
             int px = player.chunkPosition().x;
             int pz = player.chunkPosition().z;
             
-            int playerQueued = 0;
-            // Spiral out logic or simple nested loop
-            // Simple nested loop with distance check is easier
+            // v2.3.9: Optimized Spiral Scan
+            // Instead of nested O(R^2) loops, we spiral out from the center
+            // This prioritizes chunks closer to the player and allows early exit.
+            int x = 0, z = 0;
+            int dx = 0, dz = -1;
+            int maxRadiusSq = currentRadius * currentRadius;
+            int sideLimit = (currentRadius * 2 + 1);
+            int maxIterations = sideLimit * sideLimit;
             
-            for (int dx = -currentRadius; dx <= currentRadius; dx++) {
-                for (int dz = -currentRadius; dz <= currentRadius; dz++) {
-                    int cx = px + dx;
-                    int cz = pz + dz;
-                    
-                    if (dx*dx + dz*dz > currentRadius*currentRadius) continue; // Circle
-                    
-                    long key = ChunkPos.asLong(cx, cz);
-                    
-                    if (visitedChunks.contains(key)) continue;
-                    
-                    // Fast check: Is it generated?
-                    if (isChunkGenerated(cx, cz)) {
-                        visitedChunks.add(key);
-                        continue;
+            int playerQueued = 0;
+            int iterations = 0;
+
+            while (iterations < maxIterations && chunksQueued < maxQueuePerTick) {
+                if ((-currentRadius <= x && x <= currentRadius) && (-currentRadius <= z && z <= currentRadius)) {
+                    if (x*x + z*z <= maxRadiusSq) {
+                        int cx = px + x;
+                        int cz = pz + z;
+                        long key = ChunkPos.asLong(cx, cz);
+                        
+                        if (!visitedChunks.contains(key)) {
+                            // Fast check: Is it generated?
+                            // We use a non-blocking check if possible
+                            if (!isChunkGenerated(cx, cz)) {
+                                // Priority 8 (HYPERVIEW_PREFETCH) via UnifiedQueue
+                                generator.queueGeneration(cx, cz, 8);
+                                chunksQueued++;
+                                playerQueued++;
+                            }
+                            visitedChunks.add(key);
+                        }
                     }
-                    
-                    // Not generated! Queue it.
-                    // Priority 10 (Lowest)
-                    generator.queueGeneration(cx, cz, 10);
-                    visitedChunks.add(key);
-                    chunksQueued++;
-                    playerQueued++;
-                    
-                    if (chunksQueued >= maxQueuePerTick) break;
                 }
-                if (chunksQueued >= maxQueuePerTick) break;
+                
+                if (x == z || (x < 0 && x == -z) || (x > 0 && x == 1 - z)) {
+                    int temp = dx;
+                    dx = -dz;
+                    dz = temp;
+                }
+                x += dx;
+                z += dz;
+                iterations++;
             }
+            
             if (playerQueued > 0) playersWithActivity++;
+            if (chunksQueued >= maxQueuePerTick) break;
+        }
+
+        // v2.3.9: Dynamic scheduling adaptation
+        HealthMonitor.HealthSnapshot status = HealthMonitor.getInstance().getLastSnapshot();
+        if (status.isCritical()) {
+            // Slow down significantly if server is dying
+            modifySchedule(5000); 
+        } else if (status.isHealthy() && lastInterval != 2000) {
+            modifySchedule(2000);
         }
 
         if (chunksQueued > 0) {
             LOGGER.info("[TurboMC][HyperView] Queued " + chunksQueued + " chunks for " + playersWithActivity + " players in world " + world.dimension().location().getPath());
         }
+    }
+    
+    private int lastInterval = 2000;
+    private java.util.concurrent.ScheduledFuture<?> currentTask;
+
+    private synchronized void modifySchedule(int ms) {
+        if (ms == lastInterval) return;
+        if (currentTask != null) currentTask.cancel(false);
+        currentTask = prefetchExecutor.scheduleAtFixedRate(this::processTick, ms, ms, TimeUnit.MILLISECONDS);
+        lastInterval = ms;
+        LOGGER.info("[TurboMC][HyperView] Dynamic backoff: Adjusted scan interval to " + ms + "ms");
     }
     
     // Wrapper to access private/protected method or use public API

@@ -1,7 +1,7 @@
 """
 ===============================================================================
 TURBOMC - CARACTERÍSTICAS COMPLETAS IMPLEMENTADAS
-Versión 2.3.4 | Java 21+ | PaperMC Fork Optimizado
+Versión 2.3.8 | Java 21+ | PaperMC Fork Optimizado
 ===============================================================================
 
 

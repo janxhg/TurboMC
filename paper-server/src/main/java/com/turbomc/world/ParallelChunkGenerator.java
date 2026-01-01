@@ -25,6 +25,7 @@ import java.util.ArrayList;
  */
 public class ParallelChunkGenerator {
     
+    private static final java.util.logging.Logger LOGGER = java.util.logging.Logger.getLogger(ParallelChunkGenerator.class.getName());
     private final ServerLevel world;
     private ServerChunkCache chunkCache;
     private final ExecutorService generatorExecutor;
@@ -85,25 +86,37 @@ public class ParallelChunkGenerator {
         
         long chunkKey = ChunkPos.asLong(chunkX, chunkZ);
         
-        // Check if already generating
-        CompletableFuture<ChunkAccess> existing = pendingGenerations.get(chunkKey);
-        if (existing != null) {
-            return existing;
-        }
+        // v2.3.9: Use UnifiedChunkQueue for global coordination and deduplication
+        UnifiedChunkQueue.TaskType type = priority <= 5 ? 
+            UnifiedChunkQueue.TaskType.PARALLEL_GENERATION : 
+            UnifiedChunkQueue.TaskType.HYPERVIEW_PREFETCH;
+            
+        String requestId = "paragen-" + chunkKey;
         
-        // Create new generation task
-        CompletableFuture<ChunkAccess> future = new CompletableFuture<>();
-        pendingGenerations.put(chunkKey, future);
+        CompletableFuture<Boolean> queueFuture = unifiedQueue.queueTask(
+            new ChunkPos(chunkX, chunkZ), 
+            type, 
+            world, 
+            requestId
+        );
         
-        GenerationTask task = new GenerationTask(chunkX, chunkZ, priority, future);
-        taskQueue.offer(task);
+        // We need to actually trigger the generation when the queue says so
+        // However, UnifiedChunkQueue currently only tracks tasks.
+        // Let's refine how we process them.
         
-        // Submit to executor if below max concurrent
-        if (pendingGenerations.size() <= maxConcurrentGenerations) {
-            generatorExecutor.submit(this::processNextTask);
-        }
-        
-        return future;
+        // For now, we still use our executor but coordinated via unifiedQueue
+        return queueFuture.thenCompose(allowed -> {
+            if (!allowed) return CompletableFuture.completedFuture(null);
+            
+            CompletableFuture<ChunkAccess> genFuture = new CompletableFuture<>();
+            pendingGenerations.put(chunkKey, genFuture);
+            
+            generatorExecutor.submit(() -> {
+                processGeneration(chunkX, chunkZ, genFuture);
+            });
+            
+            return genFuture;
+        });
     }
     
     /**
@@ -116,49 +129,48 @@ public class ParallelChunkGenerator {
         return chunkCache;
     }
 
-    /**
-     * Process next generation task from queue.
-     */
-    private void processNextTask() {
-        // Load-aware throttling (v2.3.3)
-        var health = com.turbomc.core.autopilot.HealthMonitor.getInstance().getLastSnapshot();
-        if (health.isCritical()) {
-            try { Thread.sleep(50); } catch (InterruptedException ignored) {} // Slow down
-        }
-
-        GenerationTask task = taskQueue.poll();
+    private void processGeneration(int chunkX, int chunkZ, CompletableFuture<ChunkAccess> genFuture) {
+        long chunkKey = ChunkPos.asLong(chunkX, chunkZ);
+        String requestId = "paragen-" + chunkKey;
+        UnifiedChunkQueue.ChunkTask task = unifiedQueue.getTask(requestId);
+        
         if (task == null) {
+            genFuture.complete(null);
             return;
         }
-        
+
         long startGen = System.nanoTime();
         try {
-            // Generate chunk using vanilla system
             ServerChunkCache cache = getChunkCache();
             if (cache == null) {
-                // Try again later
-                taskQueue.offer(task);
+                genFuture.complete(null);
+                unifiedQueue.completeTask(task, false);
                 return;
             }
-            ChunkAccess chunk = cache.getChunk(task.chunkX, task.chunkZ, ChunkStatus.FULL, true);
             
-            long duration = (System.nanoTime() - startGen) / 1_000_000; // ms
+            // v2.3.9: Load-aware wait only if not critical
+            var health = com.turbomc.core.autopilot.HealthMonitor.getInstance().getLastSnapshot();
+            if (health.isCritical()) {
+                Thread.sleep(20);
+            }
+
+            ChunkAccess chunk = cache.getChunk(chunkX, chunkZ, ChunkStatus.FULL, true);
+            
+            long duration = (System.nanoTime() - startGen) / 1_000_000;
             totalGenerationTime.addAndGet(duration);
             int generated = chunksGenerated.incrementAndGet();
             
-            // Periodic progress logging (v2.3.3)
-            if (generated % 100 == 0) {
-                System.out.println("[TurboMC][ParallelGen] Generated " + generated + " chunks for world " + world.dimension().location().getPath() + 
-                                 " (Avg: " + String.format("%.1f", (double)totalGenerationTime.get() / generated) + "ms/chunk)");
+            if (generated % 250 == 0) { // Reduced logging overhead
+                LOGGER.info("[TurboMC][ParallelGen] Processed " + generated + " chunks (Avg: " + String.format("%.1f", (double)totalGenerationTime.get() / generated) + "ms)");
             }
             
-            task.future.complete(chunk);
+            genFuture.complete(chunk);
+            unifiedQueue.completeTask(task, true);
         } catch (Exception e) {
-            System.err.println("[TurboMC][ParallelGen] Failed to generate chunk [" + 
-                             task.chunkX + ", " + task.chunkZ + "]: " + e.getMessage());
-            task.future.completeExceptionally(e);
+            LOGGER.warning("[TurboMC][ParallelGen] Failed chunk [" + chunkX + ", " + chunkZ + "]: " + e.getMessage());
+            genFuture.completeExceptionally(e);
+            unifiedQueue.completeTask(task, false);
         } finally {
-            long chunkKey = ChunkPos.asLong(task.chunkX, task.chunkZ);
             pendingGenerations.remove(chunkKey);
         }
     }
@@ -312,4 +324,5 @@ public class ParallelChunkGenerator {
                 chunksGenerated, chunksPregenerated, avgGenerationTime, pendingTasks, queuedTasks, uptimeMs / 1000);
         }
     }
+
 }

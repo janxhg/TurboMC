@@ -211,16 +211,54 @@ public class TurboStorageManager implements AutoCloseable {
     }
     
     /**
-     * Resets the singleton instance for testing purposes.
+     * Dynamically update global executors based on new thread counts.
+     * v2.3.9: Support for real-time autopilot adjustments.
      */
-    public static void resetInstance() {
-        synchronized (INSTANCE_LOCK) {
-            if (instance != null) {
-                try {
-                    instance.close();
-                } catch (Exception ignored) {}
-                instance = null;
-            }
+    public void updateExecutors(int load, int write, int compress, int decompress) {
+        LOGGER.info("[TurboMC][Storage] Updating dynamic executors: L=" + load + ", W=" + write + ", C=" + compress + ", D=" + decompress);
+        
+        // In a production environment, we would use a ResizableThreadPool.
+        // For now, if the counts change, we swap the executors.
+        // NOTE: Old executors will continue until pending tasks are done.
+        
+        if (load > 0) {
+            ExecutorService old = this.globalLoadExecutor;
+            this.globalLoadExecutor = java.util.concurrent.Executors.newFixedThreadPool(load, r -> {
+                Thread t = new Thread(r, "Turbo-Global-LoadPool-Dynamic");
+                t.setDaemon(true);
+                return t;
+            });
+            if (old != null) old.shutdown();
+        }
+        
+        if (write > 0) {
+            ExecutorService old = this.globalWriteExecutor;
+            this.globalWriteExecutor = java.util.concurrent.Executors.newFixedThreadPool(write, r -> {
+                Thread t = new Thread(r, "Turbo-Global-WritePool-Dynamic");
+                t.setDaemon(true);
+                return t;
+            });
+            if (old != null) old.shutdown();
+        }
+
+        if (compress > 0) {
+            ExecutorService old = this.globalCompressionExecutor;
+            this.globalCompressionExecutor = java.util.concurrent.Executors.newFixedThreadPool(compress, r -> {
+                Thread t = new Thread(r, "Turbo-Global-CompressionPool-Dynamic");
+                t.setDaemon(true);
+                return t;
+            });
+            if (old != null) old.shutdown();
+        }
+
+        if (decompress > 0) {
+            ExecutorService old = this.globalDecompressionExecutor;
+            this.globalDecompressionExecutor = java.util.concurrent.Executors.newFixedThreadPool(decompress, r -> {
+                Thread t = new Thread(r, "Turbo-Global-DecompressionPool-Dynamic");
+                t.setDaemon(true);
+                return t;
+            });
+            if (old != null) old.shutdown();
         }
     }
     

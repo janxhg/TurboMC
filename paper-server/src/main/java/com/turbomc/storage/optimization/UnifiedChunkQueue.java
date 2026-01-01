@@ -124,18 +124,23 @@ public class UnifiedChunkQueue {
         
         // Deduplication check
         if (enableDeduplication) {
-            ChunkTask existing = activeTasks.get(chunkKey);
-            if (existing != null) {
-                // Check if new task has higher priority
-                if (type.priority < existing.type.priority) {
-                    // Replace with higher priority task
-                    activeTasks.remove(chunkKey);
-                    requestTasks.remove(existing.requestId);
-                    totalDeduplicated.incrementAndGet();
-                } else {
-                    // Keep existing task
-                    return existing.future;
+            // v2.3.9: Atomic compute logic
+            ChunkTask[] result = new ChunkTask[1];
+            activeTasks.compute(chunkKey, (key, existing) -> {
+                if (existing != null) {
+                    if (type.priority < existing.type.priority) {
+                        requestTasks.remove(existing.requestId);
+                        totalDeduplicated.incrementAndGet();
+                        return null; // Remove to replace
+                    }
+                    result[0] = existing;
+                    return existing;
                 }
+                return null;
+            });
+            
+            if (result[0] != null) {
+                return result[0].future;
             }
         }
         

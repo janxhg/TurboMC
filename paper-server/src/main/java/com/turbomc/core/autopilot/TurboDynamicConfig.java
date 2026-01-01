@@ -285,13 +285,21 @@ public class TurboDynamicConfig {
     private void adjustThreadPoolSizes(double multiplier) {
         int baseThreads = hardwareProfiler.getOptimalThreadCount(1.0);
         
-        // These would normally update the actual thread pools
-        // For now, we just log the recommended adjustments
-        LOGGER.info("[TurboMC][DynamicConfig] Recommended thread pool adjustments:");
-        LOGGER.info("  Load threads: " + (int)(baseThreads * 0.5 * multiplier));
-        LOGGER.info("  Write threads: " + (int)(baseThreads * 0.25 * multiplier));
-        LOGGER.info("  Compression threads: " + (int)(baseThreads * 0.3 * multiplier));
-        LOGGER.info("  Decompression threads: " + (int)(baseThreads * 0.4 * multiplier));
+        int loadThreads = (int)(baseThreads * 0.5 * multiplier);
+        int writeThreads = (int)(baseThreads * 0.25 * multiplier);
+        int compressionThreads = (int)(baseThreads * 0.3 * multiplier);
+        int decompressionThreads = (int)(baseThreads * 0.4 * multiplier);
+
+        // v2.3.9: Apply actual system changes
+        com.turbomc.storage.optimization.TurboStorageManager.getInstance()
+            .updateExecutors(
+                Math.max(2, loadThreads), 
+                Math.max(1, writeThreads), 
+                Math.max(1, compressionThreads), 
+                Math.max(2, decompressionThreads)
+            );
+            
+        LOGGER.info("[TurboMC][DynamicConfig] Applied thread pool adjustments (multiplier: " + multiplier + ")");
     }
     
     /**
