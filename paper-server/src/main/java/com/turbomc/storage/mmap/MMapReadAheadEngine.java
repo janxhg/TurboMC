@@ -21,6 +21,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.Set;
+import java.util.HashSet;
+import java.util.Collections;
 import com.turbomc.storage.optimization.SharedRegionResource;
 import com.turbomc.compression.TurboCompressionService;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -47,6 +51,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
     private final ExecutorService prefetchExecutor;
     private final ScheduledExecutorService maintenanceExecutor;
     private final ConcurrentHashMap<Integer, CachedChunk> chunkCache;
+    private final ConcurrentLinkedDeque<Integer> lruOrder;
     private final AtomicBoolean isClosed;
     
     // Configuration
@@ -176,6 +181,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
         });
         
         this.chunkCache = new ConcurrentHashMap<>();
+        this.lruOrder = new ConcurrentLinkedDeque<>();
         this.isClosed = new AtomicBoolean(false);
         this.currentMemoryUsage = new AtomicLong(0);
         this.cacheHits = new AtomicInteger(0);
@@ -257,6 +263,10 @@ public class MMapReadAheadEngine implements AutoCloseable {
             if (cached.isPrefetched()) {
                 recentPrefetchHits.incrementAndGet();
             }
+            // Update LRU order
+            lruOrder.remove(chunkIndex);
+            lruOrder.addLast(chunkIndex);
+            
             cached.updateLastAccess();
             
             flushBarrier.beforeRead();
@@ -471,8 +481,11 @@ public class MMapReadAheadEngine implements AutoCloseable {
         }
         
         CachedChunk cached = new CachedChunk(data, System.currentTimeMillis(), prefetched);
-        chunkCache.put(chunkIndex, cached);
-        currentMemoryUsage.addAndGet(data.length);
+        if (chunkCache.put(chunkIndex, cached) == null) {
+            currentMemoryUsage.addAndGet(data.length);
+        }
+        lruOrder.remove(chunkIndex);
+        lruOrder.addLast(chunkIndex);
     }
     
     /**
@@ -512,6 +525,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
         }
         
         CompletableFuture.runAsync(() -> {
+            Set<Integer> chunksToPrefetchKeys = new HashSet<>();
             List<int[]> chunksToPrefetch = new ArrayList<>();
             
             boolean isFastTravel = Math.abs(fVelX) >= 2 || Math.abs(fVelZ) >= 2;
@@ -521,46 +535,42 @@ public class MMapReadAheadEngine implements AutoCloseable {
                 List<int[]> predicted = intentPredictor.predict(centerX, centerZ, dynamicLookahead);
                 for (int[] p : predicted) {
                     int chunkIndex = LRFConstants.getChunkIndex(p[0] & 31, p[1] & 31);
-                    if (!chunkCache.containsKey(chunkIndex)) {
+                    if (!chunkCache.containsKey(chunkIndex) && chunksToPrefetchKeys.add(chunkIndex)) {
                         chunksToPrefetch.add(p);
                         if (chunksToPrefetch.size() >= prefetchBatchSize) break;
                     }
                 }
             }
             
-            // 2. Spatial Read-Ahead (Radial Fallback)
+            // 2. Spatial Read-Ahead (Spiral Iterator v2.4.0) - O(R) Scan
             if (chunksToPrefetch.size() < prefetchBatchSize) {
-                for (int dx = -prefetchDistance; dx <= prefetchDistance; dx++) {
-                    for (int dz = -prefetchDistance; dz <= prefetchDistance; dz++) {
-                        if (dx == 0 && dz == 0) continue; 
-                        
-                        int chunkX = centerX + dx;
-                        int chunkZ = centerZ + dz;
+                int x = 0, z = 0, dx = 0, dz = -1;
+                int maxStep = (prefetchDistance * 2 + 1) * (prefetchDistance * 2 + 1);
+                
+                for (int i = 0; i < maxStep; i++) {
+                    if (chunksToPrefetch.size() >= prefetchBatchSize) break;
+                    
+                    if (x != 0 || z != 0) {
+                        int chunkX = centerX + x;
+                        int chunkZ = centerZ + z;
                         
                         // Directional Bias: Skip chunks BEHIND us if moving fast
-                        if (isFastTravel) {
-                             if (dx * fVelX + dz * fVelZ < 0) {
-                                  if (Math.abs(dx) > 1 || Math.abs(dz) > 1) continue; 
-                             }
-                        }
-                        
-                        int chunkIndex = LRFConstants.getChunkIndex(chunkX & 31, chunkZ & 31);
-                        if (!chunkCache.containsKey(chunkIndex)) {
-                            // Deduplicate against intent
-                            boolean alreadyAdded = false;
-                            for (int[] existing : chunksToPrefetch) {
-                                if (existing[0] == chunkX && existing[1] == chunkZ) {
-                                    alreadyAdded = true;
-                                    break;
-                                }
-                            }
-                            if (!alreadyAdded) {
+                        boolean behind = isFastTravel && (x * fVelX + z * fVelZ < 0);
+                        if (!behind || (Math.abs(x) <= 1 && Math.abs(z) <= 1)) {
+                            int chunkIndex = LRFConstants.getChunkIndex(chunkX & 31, chunkZ & 31);
+                            if (!chunkCache.containsKey(chunkIndex) && chunksToPrefetchKeys.add(chunkIndex)) {
                                 chunksToPrefetch.add(new int[]{chunkX, chunkZ});
-                                if (chunksToPrefetch.size() >= prefetchBatchSize) break;
                             }
                         }
                     }
-                    if (chunksToPrefetch.size() >= prefetchBatchSize) break;
+                    
+                    if (x == z || (x < 0 && x == -z) || (x > 0 && x == 1 - z)) {
+                        int temp = dx;
+                        dx = -dz;
+                        dz = temp;
+                    }
+                    x += dx;
+                    z += dz;
                 }
             }
             // Update pending count BEFORE loop (MOVED: Now accounts for BOTH Intent and Spatial chunks)
@@ -710,22 +720,12 @@ public class MMapReadAheadEngine implements AutoCloseable {
      * Evict least recently used chunk.
      */
     private void evictLRU() {
-        CachedChunk oldest = null;
-        int oldestIndex = -1;
-        long oldestTime = Long.MAX_VALUE;
-        
-        for (var entry : chunkCache.entrySet()) {
-            CachedChunk chunk = entry.getValue();
-            if (chunk.getLastAccess() < oldestTime) {
-                oldestTime = chunk.getLastAccess();
-                oldest = chunk;
-                oldestIndex = entry.getKey();
+        Integer oldestIndex = lruOrder.pollFirst();
+        if (oldestIndex != null) {
+            CachedChunk removed = chunkCache.remove(oldestIndex);
+            if (removed != null) {
+                currentMemoryUsage.addAndGet(-removed.getData().length);
             }
-        }
-        
-        if (oldest != null) {
-            chunkCache.remove(oldestIndex);
-            currentMemoryUsage.addAndGet(-oldest.getData().length);
         }
     }
     

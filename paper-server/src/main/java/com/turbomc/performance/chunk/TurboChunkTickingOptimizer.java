@@ -6,6 +6,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.server.level.ServerChunkCache;
+import com.turbomc.core.autopilot.HealthMonitor;
+import net.minecraft.world.entity.player.Player;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -131,11 +133,11 @@ public class TurboChunkTickingOptimizer implements TurboOptimizerModule {
         }
         
         enabled = config.getBoolean("performance.chunk-ticking-optimization.enabled", true);
-        maxChunkTicksPerSecond = config.getInt("performance.chunk-ticking.max-ticks-per-second", 1000);
+        maxChunkTicksPerSecond = config.getInt("performance.chunk-ticking.max-ticks-per-second", 2000);
         maxRandomTicksPerChunk = config.getInt("performance.chunk-ticking.max-random-ticks-per-chunk", 3);
         optimizeEntityTicking = config.getBoolean("performance.chunk-ticking.optimize-entity-ticking", true);
         optimizeBlockEntities = config.getBoolean("performance.chunk-ticking.optimize-block-entities", true);
-        maxChunksTickedPerTick = config.getInt("performance.chunk-ticking.max-chunks-ticked-per-tick", 100);
+        maxChunksTickedPerTick = config.getInt("performance.chunk-ticking.max-chunks-ticked-per-tick", 200);
     }
     
     /**
@@ -325,16 +327,45 @@ public class TurboChunkTickingOptimizer implements TurboOptimizerModule {
     /**
      * Check if a chunk tick should be processed
      */
-    public boolean shouldProcessChunkTick(String chunkKey) {
+    public boolean shouldProcessChunkTick(ServerLevel level, ChunkPos pos) {
         if (!enabled) {
             return true;
         }
         
+        // 1. Dynamic Scaling based on Health
+        HealthMonitor health = HealthMonitor.getInstance();
+        double multiplier = 1.0;
+        if (health.isOverloaded()) {
+            multiplier = 0.5;
+        } else if (health.isUnderPressure()) {
+            multiplier = 0.8;
+        }
+        
+        int dynamicMax = (int) (maxChunkTicksPerSecond * multiplier);
+        
         int currentTicks = chunkTicksPerSecond.incrementAndGet();
-        if (currentTicks > maxChunkTicksPerSecond) {
+        if (currentTicks > dynamicMax) {
             skippedTicks.incrementAndGet();
             metrics.get("chunk_ticks_skipped").increment();
             return false;
+        }
+        
+        // 2. Smart Skip: Skip random ticks if no players are nearby (Proximity check)
+        boolean hasPlayers = false;
+        for (Player player : level.players()) {
+            // Check if player is within view distance (approx 128 blocks)
+            if (Math.abs(player.chunkPosition().x - pos.x) <= 8 && 
+                Math.abs(player.chunkPosition().z - pos.z) <= 8) {
+                hasPlayers = true;
+                break;
+            }
+        }
+        
+        if (!hasPlayers && health.isUnderPressure()) {
+            // Further reduce ticking for player-less chunks under pressure
+            if (System.nanoTime() % 4 != 0) { // 75% skip rate
+                return false;
+            }
         }
         
         return true;

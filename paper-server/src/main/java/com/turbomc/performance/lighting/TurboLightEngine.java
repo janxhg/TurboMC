@@ -14,6 +14,15 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.CompletableFuture;
+import com.turbomc.core.autopilot.HealthMonitor;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.core.registries.Registries;
 
 /**
  * Light Engine 2.0 with SIMD for TurboMC.
@@ -41,6 +50,7 @@ public class TurboLightEngine implements TurboOptimizerModule {
     private boolean lazyRecalculation;
     private boolean playerPriority;
     private int priorityDistance;
+    private final ExecutorService lightCalculationExecutor;
     
     // Performance metrics
     private final AtomicLong totalLightUpdates = new AtomicLong(0);
@@ -99,10 +109,12 @@ public class TurboLightEngine implements TurboOptimizerModule {
         private final byte[] skyLight;
         private final long timestamp;
         private volatile boolean dirty;
+        private final byte[] blockStatesSnapshot; // Compressed or raw block IDs for light blocking
         
         public LightSectionData() {
             this.blockLight = new byte[16 * 16 * 16];
             this.skyLight = new byte[16 * 16 * 16];
+            this.blockStatesSnapshot = new byte[16 * 16 * 16];
             this.timestamp = System.currentTimeMillis();
             this.dirty = false;
         }
@@ -120,7 +132,12 @@ public class TurboLightEngine implements TurboOptimizerModule {
     }
     
     private TurboLightEngine() {
-        // Private constructor for singleton
+        this.lightCalculationExecutor = Executors.newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 4), r -> {
+            Thread t = new Thread(r, "TurboMC-LightCalculator");
+            t.setDaemon(true);
+            t.setPriority(Thread.NORM_PRIORITY - 1);
+            return t;
+        });
     }
     
     /**
@@ -239,7 +256,7 @@ public class TurboLightEngine implements TurboOptimizerModule {
         
         // Process immediately if not using lazy recalculation
         if (!lazyRecalculation) {
-            processLightUpdate(level, key);
+            CompletableFuture.runAsync(() -> processLightUpdate(level, key), lightCalculationExecutor);
         }
     }
     
@@ -371,9 +388,17 @@ public class TurboLightEngine implements TurboOptimizerModule {
         }
         
         // Process updates
+        MinecraftServer server = MinecraftServer.getServer();
+        if (server == null) return;
+        
         for (LightSectionKey key : updates) {
-            // This would need the level instance - simplified for now
-            // processLightUpdate(level, key);
+            ServerLevel level = server.getLevel(ResourceKey.create(
+                Registries.DIMENSION, 
+                ResourceLocation.parse(key.worldName)));
+            
+            if (level != null) {
+                CompletableFuture.runAsync(() -> processLightUpdate(level, key), lightCalculationExecutor);
+            }
             pendingUpdates.remove(key);
         }
     }
@@ -382,14 +407,26 @@ public class TurboLightEngine implements TurboOptimizerModule {
      * Prioritize updates by player proximity
      */
     private List<LightSectionKey> prioritizeByPlayerProximity(List<LightSectionKey> updates) {
-        // Simplified prioritization
-        // Real implementation would check actual player positions
+        MinecraftServer server = MinecraftServer.getServer();
+        if (server == null) return updates;
+        
         return updates.stream()
             .sorted((a, b) -> {
-                // Sort by section coordinates (simplified)
-                int distA = Math.abs(a.sectionX) + Math.abs(a.sectionY) + Math.abs(a.sectionZ);
-                int distB = Math.abs(b.sectionX) + Math.abs(b.sectionY) + Math.abs(b.sectionZ);
-                return Integer.compare(distA, distB);
+                double minDistA = Double.MAX_VALUE;
+                double minDistB = Double.MAX_VALUE;
+                
+                for (ServerLevel level : server.getAllLevels()) {
+                    for (Player player : level.players()) {
+                        BlockPos pPos = player.blockPosition();
+                        BlockPos aPos = a.getOrigin();
+                        BlockPos bPos = b.getOrigin();
+                        
+                        minDistA = Math.min(minDistA, aPos.distSqr(pPos));
+                        minDistB = Math.min(minDistB, bPos.distSqr(pPos));
+                    }
+                }
+                
+                return Double.compare(minDistA, minDistB);
             })
             .collect(Collectors.toList());
     }

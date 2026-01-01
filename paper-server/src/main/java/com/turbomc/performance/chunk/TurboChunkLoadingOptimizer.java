@@ -13,8 +13,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Iterator;
 
 /**
  * Chunk loading optimization manager for TurboMC.
@@ -332,13 +334,13 @@ public class TurboChunkLoadingOptimizer {
     private List<ChunkPos> getChunksInRadius(ChunkPos center, int radius) {
         List<ChunkPos> chunks = new ArrayList<>();
         
-        // Spiral pattern for more natural loading
+        // Spiral pattern v2.4.0 - O(R) Scan
         int x = 0, z = 0;
         int dx = 0, dz = -1;
-        int maxDist = radius;
+        int maxStep = (radius * 2 + 1) * (radius * 2 + 1);
         
-        for (int i = 0; i < maxDist * maxDist; i++) {
-            if (Math.abs(x) <= radius && Math.abs(z) <= radius && (x != 0 || z != 0)) {
+        for (int i = 0; i < maxStep; i++) {
+            if (x != 0 || z != 0) {
                 chunks.add(new ChunkPos(center.x + x, center.z + z));
             }
             
@@ -480,27 +482,39 @@ public class TurboChunkLoadingOptimizer {
      */
     private static class ChunkCache {
         private final ConcurrentHashMap<String, ChunkLoadResult> cache;
+        private final ConcurrentLinkedDeque<String> lruOrder;
         private final int maxSize;
         private volatile long lastCleanup;
         
         public ChunkCache(int maxSize) {
             this.cache = new ConcurrentHashMap<>();
+            this.lruOrder = new ConcurrentLinkedDeque<>();
             this.maxSize = maxSize;
             this.lastCleanup = System.currentTimeMillis();
         }
         
         public ChunkLoadResult get(ChunkPos chunkPos, String status) {
             String key = chunkPos.x + "," + chunkPos.z + ":" + status;
-            return cache.get(key);
+            ChunkLoadResult result = cache.get(key);
+            if (result != null) {
+                lruOrder.remove(key);
+                lruOrder.addLast(key);
+            }
+            return result;
         }
         
         public void put(ChunkPos chunkPos, String status, ChunkLoadResult result) {
+            String key = chunkPos.x + "," + chunkPos.z + ":" + status;
+            if (cache.put(key, result) == null) {
+                lruOrder.addLast(key);
+            } else {
+                lruOrder.remove(key);
+                lruOrder.addLast(key);
+            }
+            
             if (cache.size() >= maxSize) {
                 cleanup();
             }
-            
-            String key = chunkPos.x + "," + chunkPos.z + ":" + status;
-            cache.put(key, result);
         }
         
         public boolean contains(ChunkPos chunkPos, String status) {
@@ -509,11 +523,17 @@ public class TurboChunkLoadingOptimizer {
         }
         
         private void cleanup() {
-            // Simple cleanup - remove oldest entries
-            if (cache.size() > maxSize * 0.8) {
-                cache.clear();
-                lastCleanup = System.currentTimeMillis();
+            // Proper LRU cleanup v2.4.0
+            int toRemove = (int) (maxSize * 0.2); // Remove 20%
+            for (int i = 0; i < toRemove; i++) {
+                String oldestKey = lruOrder.pollFirst();
+                if (oldestKey != null) {
+                    cache.remove(oldestKey);
+                } else {
+                    break;
+                }
             }
+            lastCleanup = System.currentTimeMillis();
         }
     }
     

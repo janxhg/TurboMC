@@ -55,6 +55,14 @@ public class HealthMonitor {
         return lastSnapshot.get();
     }
 
+    public boolean isOverloaded() {
+        return capture().isCritical();
+    }
+
+    public boolean isUnderPressure() {
+        return capture().isStruggling();
+    }
+
     public static record HealthSnapshot(double mspt, double tps) {
         public boolean isHealthy() {
             return mspt < 45.0 && tps > 18.0;

@@ -6,6 +6,9 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.HopperBlock;
 import net.minecraft.world.level.block.entity.HopperBlockEntity;
+import com.turbomc.core.autopilot.HealthMonitor;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.core.BlockPos;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -131,11 +134,11 @@ public class TurboHopperOptimizer implements TurboOptimizerModule {
         }
         
         enabled = config.getBoolean("performance.hopper-optimization.enabled", true);
-        maxHopperTicksPerSecond = config.getInt("performance.hopper.max-ticks-per-second", 100);
+        maxHopperTicksPerSecond = config.getInt("performance.hopper.max-ticks-per-second", 200);
         hopperTransferCooldown = config.getInt("performance.hopper.transfer-cooldown", 8);
         enableBatchProcessing = config.getBoolean("performance.hopper.enable-batch-processing", true);
         optimizeItemFiltering = config.getBoolean("performance.hopper.optimize-item-filtering", true);
-        maxHoppersPerChunk = config.getInt("performance.hopper.max-per-chunk", 50);
+        maxHoppersPerChunk = config.getInt("performance.hopper.max-per-chunk", 64);
     }
     
     /**
@@ -324,16 +327,45 @@ public class TurboHopperOptimizer implements TurboOptimizerModule {
     /**
      * Check if a hopper tick should be processed
      */
-    public boolean shouldProcessHopperTick() {
+    public boolean shouldProcessHopperTick(ServerLevel level, BlockPos pos) {
         if (!enabled) {
             return true;
         }
         
+        // 1. Dynamic Scaling based on Server Health
+        HealthMonitor health = HealthMonitor.getInstance();
+        double multiplier = 1.0;
+        if (health.isOverloaded()) {
+            multiplier = 0.4; // 60% reduction under heavy load
+        } else if (health.isUnderPressure()) {
+            multiplier = 0.7; // 30% reduction under pressure
+        }
+        
+        int dynamicMax = (int) (maxHopperTicksPerSecond * multiplier);
+        
+        // 2. Global rate limiting
         int currentTicks = hopperTicksPerSecond.incrementAndGet();
-        if (currentTicks > maxHopperTicksPerSecond) {
+        if (currentTicks > dynamicMax) {
             skippedTicks.incrementAndGet();
             metrics.get("hopper_ticks_skipped").increment();
             return false;
+        }
+        
+        // 3. Proximity Bias: Hoppers far from players are throttled more aggressively
+        boolean nearPlayer = false;
+        for (Player player : level.players()) {
+            if (player.blockPosition().distSqr(pos) < 1024) { // 32 blocks
+                nearPlayer = true;
+                break;
+            }
+        }
+        
+        if (!nearPlayer && health.isUnderPressure()) {
+            // Half the chance to tick if far from players and server is struggling
+            if (System.nanoTime() % 2 == 0) {
+                skippedTicks.incrementAndGet();
+                return false;
+            }
         }
         
         return true;

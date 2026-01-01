@@ -219,24 +219,16 @@ public class TurboIOWorker implements ChunkScanAccess, AutoCloseable {
         } else {
             CompletableFuture<T> completableFuture = new CompletableFuture<>();
             
-            // For PaperMC Moonrise compatibility, ensure critical operations run on main thread
-            if (priority == Priority.FOREGROUND) {
-                // Run critical operations synchronously on main thread
+            // v2.4.0 Optimization: Always use the consecutiveExecutor to prevent main-thread stalls.
+            // Foreground tasks get high priority in the queue but do NOT block the calling thread.
+            this.consecutiveExecutor.scheduleWithResult(priority.ordinal(), (future) -> {
                 try {
                     completableFuture.complete(task.get());
                 } catch (Exception var3) {
                     completableFuture.completeExceptionally(var3);
                 }
-            } else {
-                // Background operations can use the executor
-                this.consecutiveExecutor.scheduleWithResult(priority.ordinal(), (future) -> {
-                    try {
-                        completableFuture.complete(task.get());
-                    } catch (Exception var3) {
-                        completableFuture.completeExceptionally(var3);
-                    }
-                });
-            }
+            });
+            
             return completableFuture;
         }
     }
