@@ -66,16 +66,20 @@ public class UnifiedChunkQueue {
     private final Map<Long, ChunkTask> activeTasks = new ConcurrentHashMap<>();
     private final Map<String, ChunkTask> requestTasks = new ConcurrentHashMap<>();
     
-    // Statistics
+    // Statistics & Counters (Atomic for O(1) access)
+    private final AtomicInteger activeTaskCount = new AtomicInteger(0);
     private final AtomicInteger totalQueued = new AtomicInteger(0);
     private final AtomicInteger totalCompleted = new AtomicInteger(0);
     private final AtomicInteger totalDeduplicated = new AtomicInteger(0);
     private final AtomicLong totalProcessingTime = new AtomicLong(0);
     
     // Configuration
-    private final int maxQueueSize;
-    private final int maxConcurrentTasks;
-    private final boolean enableDeduplication;
+    private int maxQueueSize;
+    private int maxConcurrentTasks;
+    private boolean enableDeduplication;
+    
+    // Logger
+    private static final java.util.logging.Logger LOGGER = java.util.logging.Logger.getLogger(UnifiedChunkQueue.class.getName());
     
     // Singleton instance
     private static volatile UnifiedChunkQueue instance;
@@ -99,21 +103,27 @@ public class UnifiedChunkQueue {
         this.enableDeduplication = config.getBoolean("storage.unified.enable-deduplication", true);
         
         // Priority queue with custom comparator
-        this.taskQueue = new PriorityBlockingQueue<>(maxQueueSize, 
+        this.taskQueue = new PriorityBlockingQueue<>(Math.max(1, maxQueueSize), 
             Comparator.comparingInt((ChunkTask t) -> t.type.priority)
                      .thenComparingLong(t -> t.timestamp));
-        
-        System.out.println("[TurboMC][UnifiedQueue] Initialized: maxQueue=" + maxQueueSize + 
+                     
+        LOGGER.info("[TurboMC][UnifiedQueue] Initialized: maxQueue=" + maxQueueSize + 
                           ", maxConcurrent=" + maxConcurrentTasks + 
                           ", deduplication=" + enableDeduplication);
     }
     
+    public void updateSettings(int maxQueue, int maxConcurrent, boolean dedupe) {
+        this.maxQueueSize = maxQueue;
+        this.maxConcurrentTasks = maxConcurrent;
+        this.enableDeduplication = dedupe;
+    }
+
     /**
      * Queue a chunk task with automatic deduplication
      */
     public CompletableFuture<Boolean> queueTask(ChunkPos pos, TaskType type, ServerLevel world, String requestId) {
-        if (activeTasks.size() >= maxConcurrentTasks) {
-            return CompletableFuture.completedFuture(false); // Queue full
+        if (activeTaskCount.get() >= maxConcurrentTasks) {
+            return CompletableFuture.completedFuture(false); // Task limit reached
         }
         
         if (taskQueue.size() >= maxQueueSize) {
@@ -124,14 +134,21 @@ public class UnifiedChunkQueue {
         
         // Deduplication check
         if (enableDeduplication) {
-            // v2.3.9: Atomic compute logic
             ChunkTask[] result = new ChunkTask[1];
             activeTasks.compute(chunkKey, (key, existing) -> {
                 if (existing != null) {
                     if (type.priority < existing.type.priority) {
                         requestTasks.remove(existing.requestId);
+                        // Do not decrement activeTaskCount here because we are technically replacing one with another
+                        // Wait, if we replace, we might remove the old one from queue?
+                        // PriorityBlockingQueue.remove is O(N). Avoiding it is better.
+                        // We will mark old task cancelled or just let it run?
+                        // Current logic in original code just returned null to replace? 
+                        // "return null" in compute removes the mapping. 
+                        // So we remove existing, then we will add new.
                         totalDeduplicated.incrementAndGet();
-                        return null; // Remove to replace
+                        activeTaskCount.decrementAndGet(); 
+                        return null; 
                     }
                     result[0] = existing;
                     return existing;
@@ -149,6 +166,11 @@ public class UnifiedChunkQueue {
         if (enableDeduplication) {
             activeTasks.put(chunkKey, task);
             requestTasks.put(requestId, task);
+            activeTaskCount.incrementAndGet();
+        } else {
+             // Even if deduplication disabled, we might want to track count?
+             // Original code only put in map if deduplication enabled.
+             // If deduplication disabled, we rely on taskQueue size?
         }
         
         taskQueue.offer(task);
@@ -157,21 +179,17 @@ public class UnifiedChunkQueue {
         return task.future;
     }
     
-    /**
-     * Get next task for processing
-     */
     public ChunkTask getNextTask() {
         return taskQueue.poll();
     }
     
-    /**
-     * Mark task as completed
-     */
     public void completeTask(ChunkTask task, boolean success) {
         long chunkKey = ChunkPos.asLong(task.position.x, task.position.z);
         
         if (enableDeduplication) {
-            activeTasks.remove(chunkKey);
+            if (activeTasks.remove(chunkKey) != null) {
+                 activeTaskCount.decrementAndGet();
+            }
             requestTasks.remove(task.requestId);
         }
         
@@ -181,21 +199,17 @@ public class UnifiedChunkQueue {
         task.future.complete(success);
     }
     
-    /**
-     * Get task by request ID
-     */
     public ChunkTask getTask(String requestId) {
         return requestTasks.get(requestId);
     }
     
-    /**
-     * Cancel task by request ID
-     */
     public boolean cancelTask(String requestId) {
         ChunkTask task = requestTasks.remove(requestId);
         if (task != null) {
             long chunkKey = ChunkPos.asLong(task.position.x, task.position.z);
-            activeTasks.remove(chunkKey);
+            if (activeTasks.remove(chunkKey) != null) {
+                activeTaskCount.decrementAndGet();
+            }
             taskQueue.remove(task);
             task.future.cancel(false);
             return true;
@@ -203,13 +217,10 @@ public class UnifiedChunkQueue {
         return false;
     }
     
-    /**
-     * Get queue statistics
-     */
     public QueueStats getStats() {
         return new QueueStats(
             taskQueue.size(),
-            activeTasks.size(),
+            activeTaskCount.get(),
             totalQueued.get(),
             totalCompleted.get(),
             totalDeduplicated.get(),

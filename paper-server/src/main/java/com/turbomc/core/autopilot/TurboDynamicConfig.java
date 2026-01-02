@@ -74,6 +74,8 @@ public class TurboDynamicConfig {
     private TurboDynamicConfig() {
         this.hardwareProfiler = TurboHardwareProfiler.getInstance();
         this.config = TurboConfig.getInstance();
+        this.enabled.set(config.getBoolean("storage.dynamic.enabled", true));
+        
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "TurboMC-DynamicConfig");
             t.setDaemon(true);
@@ -81,10 +83,13 @@ public class TurboDynamicConfig {
             return t;
         });
         
-        // Start dynamic adjustment
-        startDynamicAdjustment();
-        
-        LOGGER.info("[TurboMC][DynamicConfig] Initialized with mode: " + currentMode.name);
+        // Start dynamic adjustment only if enabled
+        if (this.enabled.get()) {
+            startDynamicAdjustment();
+            LOGGER.info("[TurboMC][DynamicConfig] Initialized with mode: " + currentMode.name);
+        } else {
+            LOGGER.info("[TurboMC][DynamicConfig] Disabled by configuration.");
+        }
     }
     
     public static TurboDynamicConfig getInstance() {
@@ -104,6 +109,7 @@ public class TurboDynamicConfig {
     private void startDynamicAdjustment() {
         // Refresh hardware profile periodically
         scheduler.scheduleAtFixedRate(() -> {
+            if (!enabled.get()) return;
             try {
                 hardwareProfiler.refreshProfile();
             } catch (Exception e) {
@@ -113,10 +119,9 @@ public class TurboDynamicConfig {
         
         // Perform dynamic adjustments
         scheduler.scheduleAtFixedRate(() -> {
+            if (!enabled.get()) return;
             try {
-                if (enabled.get()) {
-                    performDynamicAdjustment();
-                }
+                performDynamicAdjustment();
             } catch (Exception e) {
                 LOGGER.warning("[TurboMC][DynamicConfig] Error during dynamic adjustment: " + e.getMessage());
             }
@@ -127,6 +132,7 @@ public class TurboDynamicConfig {
      * Perform dynamic configuration adjustments
      */
     private void performDynamicAdjustment() {
+        if (!enabled.get()) return;
         TurboHardwareProfiler.HardwareProfile profile = hardwareProfiler.getCurrentProfile();
         
         // Determine adjustment strategy based on system pressure

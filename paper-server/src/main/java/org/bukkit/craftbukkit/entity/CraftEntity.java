@@ -21,6 +21,7 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ChunkLevel;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
@@ -1126,7 +1127,7 @@ public abstract class CraftEntity implements org.bukkit.entity.Entity {
                 MinecraftServer.getServer().scheduleOnMain(() -> {
                     final ServerChunkCache chunkCache = world.getChunkSource();
                     for (final net.minecraft.world.level.chunk.ChunkAccess chunk : chunks) {
-                        chunkCache.addTicketAtLevel(TicketType.POST_TELEPORT, chunk.getPos(), ChunkLevel.FULL_CHUNK_LEVEL);
+                        chunkCache.addTicketAtLevel(TicketType.POST_TELEPORT, chunk.getPos(), ChunkLevel.byStatus(ChunkStatus.FULL));
                     }
                     try {
                         ret.complete(CraftEntity.this.teleport0(locationClone, cause, teleportFlags) ? Boolean.TRUE : Boolean.FALSE);

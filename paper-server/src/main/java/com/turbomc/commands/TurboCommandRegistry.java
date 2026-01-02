@@ -44,6 +44,9 @@ public final class TurboCommandRegistry {
         // Register inspector commands
         TurboInspectorCommand.register(dispatcher);
         
+        // Register stress test command
+        TurboStressTestCommand.register(dispatcher);
+        
         // Future commands can be registered here
          TurboGenerationCommand.register(dispatcher);
         TurboHyperViewCommand.register(dispatcher); // v2.3.3 HyperView
@@ -59,7 +62,7 @@ public final class TurboCommandRegistry {
      */
     public static int getCommandCount() {
         // Storage and inspector commands are registered
-        return 2;
+        return 3;
     }
     
     /**
@@ -69,6 +72,7 @@ public final class TurboCommandRegistry {
         return new String[]{
             "turbo storage",
             "turbo inspect",
+            "turbo stress",
             "turbo ovf"
         };
     }
@@ -101,6 +105,28 @@ public final class TurboCommandRegistry {
                          TurboStatsCommand.execute(sender);
                          return true;
                          
+                    case "stress":
+                        if (args.length < 2) {
+                            sender.sendMessage("§cUsage: /turbo stress <mobs|chunks|full> [args...]");
+                            return true;
+                        }
+                        String stressType = args[1].toLowerCase();
+                        if (stressType.equals("mobs")) {
+                            int count = args.length > 2 ? parseInt(args[2], 100) : 100;
+                            String type = args.length > 3 ? args[3] : "ZOMBIE";
+                            int duration = args.length > 4 ? parseInt(args[4], 60) : 60;
+                            TurboStressTestCommand.testMobsStress(sender, count, type, duration);
+                        } else if (stressType.equals("chunks")) {
+                            int count = args.length > 2 ? parseInt(args[2], 1000) : 1000;
+                            TurboStressTestCommand.testChunksStress(sender, count);
+                        } else if (stressType.equals("full")) {
+                            String intensity = args.length > 2 ? args[2] : "normal";
+                            TurboStressTestCommand.testFullStress(sender, intensity);
+                        } else {
+                            sender.sendMessage("§cUnknown stress type: " + stressType);
+                        }
+                        return true;
+
                     case "test":
                          if (args.length < 2) {
                              sender.sendMessage("§cUsage: /turbo test <chunks|gen|flight|cache> [args...]");

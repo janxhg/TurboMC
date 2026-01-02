@@ -23,7 +23,7 @@ public class LRFRegionFileAdapter extends RegionFile {
     private final Object fileLock = new Object();
 
     public LRFRegionFileAdapter(RegionStorageInfo info, Path path) throws IOException {
-        super(info, path);
+        super(info, path, path.getParent(), true);
         this.filePath = path;
 
         boolean exists = Files.exists(path);

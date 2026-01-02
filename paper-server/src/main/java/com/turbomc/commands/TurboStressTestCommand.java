@@ -191,17 +191,75 @@ public class TurboStressTestCommand {
         );
     }
 
-    private static void testMobsStress(org.bukkit.command.CommandSender sender, int count, String type, int duration) {
-        sender.sendMessage("§e[TurboMC] Starting Mob Stress Test: " + count + " " + type + " for " + duration + "s");
+    public static void testMobsStress(org.bukkit.command.CommandSender sender, int count, String type, int duration) {
+        if (!(sender instanceof Player)) {
+            sender.sendMessage("§cOnly players can run this test.");
+            return;
+        }
+        
+        Player player = (Player) sender;
+        PerformanceMetrics metrics = new PerformanceMetrics();
+        metrics.reset();
+        
+        sender.sendMessage("§6╔═══════════════════════════════════════════╗");
+        sender.sendMessage("§6║  §e§lAdvanced Entity Stress Test§6             ║");
+        sender.sendMessage("§6╠═══════════════════════════════════════════╣");
+        sender.sendMessage("§6║ §7Entities: §a" + count + " §7" + type);
+        sender.sendMessage("§6║ §7Duration: §a" + duration + "s");
+        sender.sendMessage("§6║ §7Metrics: §bTPS, MSPT, RAM");
+        sender.sendMessage("§6╚═══════════════════════════════════════════╝");
+        
+        // 1. Spawn Entities
         TurboTestCommand.testMobs(sender, count, type);
+        
+        // 2. Start Monitoring
+        startStressMonitor(sender, duration, metrics);
+    }
+    
+    // Better implementation using Thread for monitoring (since we are in core server code)
+    private static void startStressMonitor(org.bukkit.command.CommandSender sender, int duration, PerformanceMetrics metrics) {
+        new Thread(() -> {
+            try {
+                for (int i = 0; i < duration; i++) {
+                    Thread.sleep(1000);
+                    net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
+                    double mspt = server.getAverageTickTimeNanos() / 1_000_000.0;
+                    double tps = Math.min(20.0, 1000.0 / Math.max(50.0, mspt));
+                    long freeMem = Runtime.getRuntime().freeMemory() / 1024 / 1024;
+                    long totalMem = Runtime.getRuntime().totalMemory() / 1024 / 1024;
+                    long usedMem = totalMem - freeMem;
+                    
+                    metrics.addSample(tps, mspt, usedMem);
+                    sender.sendMessage("§7[Stress] T+" + (i+1) + "s | MSPT: §e" + String.format("%.2f", mspt) + "ms §7| RAM: §b" + usedMem + "MB");
+                }
+                
+                finishTest(sender, metrics);
+                
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }).start();
     }
 
-    private static void testChunksStress(org.bukkit.command.CommandSender sender, int count) {
+    private static void finishTest(org.bukkit.command.CommandSender sender, PerformanceMetrics metrics) {
+        sender.sendMessage("§6╔═══════════════════════════════════════════╗");
+        sender.sendMessage("§6║  §a§lStress Test Complete!§6                   ║");
+        sender.sendMessage("§6╠═══════════════════════════════════════════╣");
+        sender.sendMessage("§6║ §eResults:");
+        sender.sendMessage("§6║   §7Avg TPS: §a" + String.format("%.2f", metrics.getAverageTPS()));
+        sender.sendMessage("§6║   §7Avg MSPT: §e" + String.format("%.2f", metrics.getAverageMSPT()) + "ms");
+        sender.sendMessage("§6║   §7Avg RAM: §b" + metrics.getAverageMemory() + "MB");
+        sender.sendMessage("§6║   §7Lag Spikes: §c" + metrics.lagSpikes.get());
+        sender.sendMessage("§6║ §7Run /kill @e[type=!player] to cleanup.");
+        sender.sendMessage("§6╚═══════════════════════════════════════════╝");
+    }
+
+    public static void testChunksStress(org.bukkit.command.CommandSender sender, int count) {
         sender.sendMessage("§e[TurboMC] Starting Chunk Stress Test: " + count + " chunks");
         TurboTestCommand.testChunks(sender, count);
     }
 
-    private static void testFullStress(org.bukkit.command.CommandSender sender, String intensity) {
+    public static void testFullStress(org.bukkit.command.CommandSender sender, String intensity) {
         sender.sendMessage("§c[TurboMC] CAUTION: Starting FULL SYSTEM STRESS TEST (Intensity: " + intensity + ")");
         TurboTestCommand.testGeneration(sender, intensity.equalsIgnoreCase("high") ? 16 : 8);
     }

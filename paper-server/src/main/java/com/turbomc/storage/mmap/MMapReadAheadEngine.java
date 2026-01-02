@@ -598,7 +598,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
                     try {
                         if (virtualized) {
                             // Virtual prefetch (LOD 0/3/4) - Just warm the mapping
-                            readChunkDirect(targetX, targetZ);
+                            warmChunk(targetX, targetZ);
                         } else {
                             byte[] data = readChunkDirect(targetX, targetZ);
                             if (data != null) {
@@ -681,7 +681,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
                             // v2.4.1 Fix: Use flushBarrier for synchronization even during ultra-scan
                             flushBarrier.beforeRead();
                             try {
-                                readChunkDirect(coords[0], coords[1]);
+                                warmChunk(coords[0], coords[1]);
                             } finally {
                                 flushBarrier.afterRead(mappedBuffer);
                             }
@@ -693,6 +693,30 @@ public class MMapReadAheadEngine implements AutoCloseable {
                 try { Thread.sleep(50); } catch (InterruptedException ignored) {}
             }
         }, prefetchExecutor);
+    }
+    
+    /**
+     * "Warms" a chunk by touching its memory page without full decompression.
+     * Efficient for LOD/Virtualization prefetching.
+     */
+    private void warmChunk(int chunkX, int chunkZ) throws IOException {
+        // Read LRF header to find where the chunk is
+        LRFHeader header = readHeader();
+        if (!header.hasChunk(chunkX, chunkZ)) return;
+        
+        int offset = header.getChunkOffset(chunkX, chunkZ);
+        
+        // Touch the memory to trigger OS paging
+        if (mappedBuffer != null && offset < mappedBuffer.limit()) {
+            // Just read one byte. This forces the OS to page-in the block containing the start of the chunk.
+            // Since pages are usually 4KB, this likely brings in most of the header.
+            // We don't need to read the whole payload to "warm" the file cache.
+            mappedBuffer.get(offset);
+        } else {
+             // Fallback: Read 1 byte from file channel
+             ByteBuffer dummy = ByteBuffer.allocate(1);
+             fileChannel.read(dummy, offset);
+        }
     }
     
     /**
