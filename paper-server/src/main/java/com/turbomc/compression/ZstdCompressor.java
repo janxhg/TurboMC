@@ -19,31 +19,30 @@ public class ZstdCompressor implements Compressor {
 
     @Override
     public byte[] compress(byte[] data) throws CompressionException {
+        com.turbomc.util.BufferPool pool = com.turbomc.util.BufferPool.getInstance();
+        long maxCompressedSize = Zstd.compressBound(data.length);
+        if (maxCompressedSize > Integer.MAX_VALUE) {
+            throw new CompressionException("Data too large for single array compression");
+        }
+        
+        byte[] output = pool.acquire((int) maxCompressedSize + 1);
         try {
-            long maxCompressedSize = Zstd.compressBound(data.length);
-            // Verify size fits in array (Java arrays limited to 2GB approx)
-            if (maxCompressedSize > Integer.MAX_VALUE) {
-                throw new CompressionException("Data too large for single array compression");
-            }
-            
-            byte[] output = new byte[(int) maxCompressedSize + 1]; // +1 for magic byte
             output[0] = getMagicByte();
-            
-            long compressedSize = Zstd.compressByteArray(output, 1, (int)maxCompressedSize, data, 0, data.length, level);
+            long compressedSize = Zstd.compressByteArray(output, 1, output.length - 1, data, 0, data.length, level);
             
             if (Zstd.isError(compressedSize)) {
                  throw new CompressionException("Zstd compression error: " + Zstd.getErrorName(compressedSize));
             }
             
-            // Trim array if needed?
-            // Usually we return exact array or let the caller handle it. Assumed caller expects exact array?
-            // TurboCompressionService returns byte[], so exact array is safer.
+            // We must return an exact array for the current storage architecture
             byte[] exact = new byte[(int)compressedSize + 1];
             System.arraycopy(output, 0, exact, 0, (int)compressedSize + 1);
             return exact;
             
         } catch (Exception e) {
             throw new CompressionException("Zstd compression failed", e);
+        } finally {
+            pool.release(output);
         }
     }
 

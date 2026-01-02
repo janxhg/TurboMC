@@ -115,33 +115,37 @@ public class SharedRegionResource implements AutoCloseable {
         // Upgrade to write lock for header reload
         headerLock.writeLock().lock();
         try {
-            
-            byte[] headerData = new byte[LRFConstants.HEADER_SIZE];
-            ByteBuffer headerBuffer = ByteBuffer.wrap(headerData);
-            
-            // Concurrent-safe read from channel
-            int read = channel.read(headerBuffer, 0);
-            if (read < LRFConstants.HEADER_SIZE) {
-                // Try mmap fallback
-                if (mappedBuffer != null) {
-                    ByteBuffer slice = mappedBuffer.slice();
-                    slice.limit(Math.min(LRFConstants.HEADER_SIZE, slice.capacity()));
-                    slice.get(headerData);
-                } else if (read <= 0 && channel.size() == 0) {
-                    // New file, create empty header
-                    return LRFHeader.createEmpty();
-                } else {
-                    throw new IOException("Failed to read definitive LRF header from " + path);
+            com.turbomc.util.BufferPool pool = com.turbomc.util.BufferPool.getInstance();
+            byte[] headerData = pool.acquire(LRFConstants.HEADER_SIZE);
+            try {
+                ByteBuffer headerBuffer = ByteBuffer.wrap(headerData);
+                
+                // Concurrent-safe read from channel
+                int read = channel.read(headerBuffer, 0);
+                if (read < LRFConstants.HEADER_SIZE) {
+                    // Try mmap fallback
+                    if (mappedBuffer != null) {
+                        ByteBuffer slice = mappedBuffer.slice();
+                        slice.limit(Math.min(LRFConstants.HEADER_SIZE, slice.capacity()));
+                        slice.get(headerData);
+                    } else if (read <= 0 && channel.size() == 0) {
+                        // New file, create empty header
+                        return LRFHeader.createEmpty();
+                    } else {
+                        throw new IOException("Failed to read definitive LRF header from " + path);
+                    }
                 }
+                
+                header = LRFHeader.read(ByteBuffer.wrap(headerData));
+                cachedHeader = header;
+                lastFileModified = currentModified;
+                lastFileSize = currentSize;
+                lastHeaderRefresh = System.currentTimeMillis();
+                lastHeaderUpdate = System.currentTimeMillis();
+                return header;
+            } finally {
+                pool.release(headerData);
             }
-            
-            header = LRFHeader.read(ByteBuffer.wrap(headerData));
-            cachedHeader = header;
-            lastFileModified = currentModified;
-            lastFileSize = currentSize;
-            lastHeaderRefresh = System.currentTimeMillis();
-            lastHeaderUpdate = System.currentTimeMillis();
-            return header;
         } finally {
             headerLock.writeLock().unlock();
         }

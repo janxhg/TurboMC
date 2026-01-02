@@ -151,7 +151,9 @@ public class ParallelChunkGenerator {
             // v2.3.9: Load-aware wait only if not critical
             var health = com.turbomc.core.autopilot.HealthMonitor.getInstance().getLastSnapshot();
             if (health.isCritical()) {
-                Thread.sleep(20);
+                 // Optimization: If server is dying, DON'T sleep (blocking threads).
+                 // Instead, skip optional pregeneration logic or just proceed cautiously.
+                 // For now, removing the sleep as it causes thread starvation.
             }
 
             ChunkAccess chunk = cache.getChunk(chunkX, chunkZ, ChunkStatus.FULL, true);

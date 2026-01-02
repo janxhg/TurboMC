@@ -31,10 +31,9 @@ public class LRFRegionReader implements AutoCloseable {
     private final LRFHeader header;
     private final SharedRegionResource sharedResource;
     
-    // Performance optimizations
-    // Synchronized cache for raw bytes (decompressed or not, depending on usage)
-    private final Int2ObjectMap<byte[]> chunkCache;
-    private final Object cacheLock = new Object();
+    // Concurrent cache for raw bytes (decompressed)
+    private final java.util.concurrent.ConcurrentHashMap<Integer, byte[]> chunkCache;
+    // Removed cacheLock - ConcurrentHashMap handles its own concurrency
     
     // FIXED: Memory usage tracking for cache
     private final AtomicLong currentCacheSize = new AtomicLong(0);
@@ -75,7 +74,7 @@ public class LRFRegionReader implements AutoCloseable {
         this.header = readInternalHeader();
         
         // Initialize stats
-        this.chunkCache = new Int2ObjectOpenHashMap<>();
+        this.chunkCache = new java.util.concurrent.ConcurrentHashMap<>();
         this.cacheHits = new AtomicLong(0);
         this.cacheMisses = new AtomicLong(0);
     }
@@ -98,7 +97,7 @@ public class LRFRegionReader implements AutoCloseable {
         this.header = readInternalHeader();
         
         // Initialize stats
-        this.chunkCache = new Int2ObjectOpenHashMap<>();
+        this.chunkCache = new java.util.concurrent.ConcurrentHashMap<>();
         this.cacheHits = new AtomicLong(0);
         this.cacheMisses = new AtomicLong(0);
     }
@@ -108,15 +107,21 @@ public class LRFRegionReader implements AutoCloseable {
             return sharedResource.getHeader();
         }
         
-        ByteBuffer headerBuffer = ByteBuffer.allocate(LRFConstants.HEADER_SIZE);
-        if (mappedBuffer != null) {
-            // Absolute get is concurrent-safe
-            mappedBuffer.get(0, headerBuffer.array());
-        } else {
-            // Absolute read is concurrent-safe
-            channel.read(headerBuffer, 0);
+        com.turbomc.util.BufferPool pool = com.turbomc.util.BufferPool.getInstance();
+        byte[] headerData = pool.acquire(LRFConstants.HEADER_SIZE);
+        try {
+            if (mappedBuffer != null) {
+                // Absolute get is concurrent-safe
+                mappedBuffer.get(0, headerData);
+            } else {
+                // Absolute read is concurrent-safe
+                ByteBuffer wrap = ByteBuffer.wrap(headerData);
+                channel.read(wrap, 0);
+            }
+            return LRFHeader.read(ByteBuffer.wrap(headerData));
+        } finally {
+            pool.release(headerData);
         }
-        return LRFHeader.read(ByteBuffer.wrap(headerBuffer.array()));
     }
     
     /**
@@ -131,10 +136,7 @@ public class LRFRegionReader implements AutoCloseable {
         int chunkIndex = LRFConstants.getChunkIndex(chunkX, chunkZ);
         
         // Check cache first
-        byte[] cachedData;
-        synchronized (cacheLock) {
-            cachedData = chunkCache.get(chunkIndex);
-        }
+        byte[] cachedData = chunkCache.get(chunkIndex);
         
         if (cachedData != null) {
             cacheHits.incrementAndGet();
@@ -164,117 +166,125 @@ public class LRFRegionReader implements AutoCloseable {
             return null;
         }
         
-        byte[] rawSectorData = new byte[size];
+        com.turbomc.util.BufferPool pool = com.turbomc.util.BufferPool.getInstance();
+        byte[] rawSectorData = pool.acquire(size);
         
-        if (mappedBuffer != null && offset + size <= mappedBuffer.limit()) {
-            // Zero-copy read from mmap
-            try {
-                // Optimized concurrent access - absolute get is naturally thread-safe
-                mappedBuffer.get(offset, rawSectorData);
-            } catch (Exception e) {
-                // Fallback to standard I/O if mmap access fails
+        try {
+            if (mappedBuffer != null && offset + size <= mappedBuffer.limit()) {
+                // Zero-copy read from mmap
+                try {
+                    // Optimized concurrent access - absolute get is naturally thread-safe
+                    mappedBuffer.get(offset, rawSectorData);
+                } catch (Exception e) {
+                    // Fallback to standard I/O if mmap access fails
+                    ByteBuffer readBuffer = ByteBuffer.wrap(rawSectorData);
+                    channel.read(readBuffer, offset);
+                }
+            } else {
+                // Standard I/O read (or fallback for growth)
+                // Absolute channel.read(buffer, position) is naturally thread-safe for reading
                 ByteBuffer readBuffer = ByteBuffer.wrap(rawSectorData);
-                channel.read(readBuffer, offset);
-            }
-        } else {
-            // Standard I/O read (or fallback for growth)
-            // Absolute channel.read(buffer, position) is naturally thread-safe for reading
-            ByteBuffer readBuffer = ByteBuffer.wrap(rawSectorData);
-            int bytesRead = channel.read(readBuffer, offset);
-            
-            if (bytesRead < size) {
-                // Retry loop for partial reads (concurrent growth)
-                int retries = 0;
-                while (bytesRead < size && retries < 3) {
-                    try { Thread.sleep(5); } catch (InterruptedException ignored) {}
-                    readBuffer = ByteBuffer.wrap(rawSectorData, bytesRead, size - bytesRead);
-                    int read = channel.read(readBuffer, offset + bytesRead);
-                    if (read > 0) {
-                        bytesRead += read;
+                int bytesRead = channel.read(readBuffer, offset);
+                
+                if (bytesRead < size) {
+                    // Retry loop for partial reads (concurrent growth)
+                    int retries = 0;
+                    while (bytesRead < size && retries < 3) {
+                        try { Thread.sleep(5); } catch (InterruptedException ignored) {}
+                        readBuffer = ByteBuffer.wrap(rawSectorData, bytesRead, size - bytesRead);
+                        int read = channel.read(readBuffer, offset + bytesRead);
+                        if (read > 0) {
+                            bytesRead += read;
+                        }
+                        retries++;
                     }
-                    retries++;
+                }
+                
+                if (bytesRead < size) {
+                    return null;
                 }
             }
             
-            if (bytesRead < size) {
+            // Parse Length Header (First 5 bytes: 4 length + 1 compression type)
+            if (size < 5) {
+                System.err.println("[TurboMC][LRF][WARN] Chunk (" + chunkX + "," + chunkZ + ") too small: " + size + " bytes");
                 return null;
             }
-        }
-        
-        // Parse Length Header (First 5 bytes: 4 length + 1 compression type)
-        if (size < 5) {
-            System.err.println("[TurboMC][LRF][WARN] Chunk (" + chunkX + "," + chunkZ + ") too small: " + size + " bytes");
-            return null;
-        }
-        
-        int totalLength = ((rawSectorData[0] & 0xFF) << 24) | 
-                          ((rawSectorData[1] & 0xFF) << 16) | 
-                          ((rawSectorData[2] & 0xFF) << 8) | 
-                          (rawSectorData[3] & 0xFF);
-        
-        // FIX #11: Read per-chunk compression type
-        int chunkCompressionType = rawSectorData[4] & 0xFF;
-                           
-        if (totalLength <= 5 || totalLength > size || totalLength > LRFConstants.MAX_CHUNK_SIZE) {
-            System.err.println("[TurboMC][LRF][WARN] Invalid chunk length " + totalLength + " for (" + chunkX + "," + chunkZ + ")");
-            return null; 
-        }
-        
-        int compressedPayloadSize = totalLength - 5;  // Subtract header (4) + compression type (1)
-        
-        // FIX #10: Use ByteBuffer.slice() to avoid copy
-        byte[] compressedPayload;
-        if (compressedPayloadSize > 0) {
-            ByteBuffer payloadBuffer = ByteBuffer.wrap(rawSectorData, 5, compressedPayloadSize);
-            compressedPayload = new byte[compressedPayloadSize];
-            payloadBuffer.get(compressedPayload);
-        } else {
-            compressedPayload = new byte[0];
-        }
-        
-        byte[] data;
-        if (chunkCompressionType == LRFConstants.COMPRESSION_NONE) {
-            data = compressedPayload;
-        } else {
+            
+            int totalLength = ((rawSectorData[0] & 0xFF) << 24) | 
+                              ((rawSectorData[1] & 0xFF) << 16) | 
+                              ((rawSectorData[2] & 0xFF) << 8) | 
+                              (rawSectorData[3] & 0xFF);
+            
+            // FIX #11: Read per-chunk compression type
+            int chunkCompressionType = rawSectorData[4] & 0xFF;
+                               
+            if (totalLength <= 5 || totalLength > size || totalLength > LRFConstants.MAX_CHUNK_SIZE) {
+                System.err.println("[TurboMC][LRF][WARN] Invalid chunk length " + totalLength + " for (" + chunkX + "," + chunkZ + ")");
+                return null; 
+            }
+            
+            int compressedPayloadSize = totalLength - 5;  // Subtract header (4) + compression type (1)
+            
+            // FIX #10: Use BufferPool for payload to avoid copy
+            byte[] compressedPayload = pool.acquire(compressedPayloadSize);
             try {
-                data = TurboCompressionService.getInstance().decompress(compressedPayload);
-            } catch (Exception e) {
-                System.err.println("[TurboMC][LRF][ERROR] Decompression failed for (" + chunkX + "," + chunkZ + "): " + e.getMessage());
-                return null;
+                System.arraycopy(rawSectorData, 5, compressedPayload, 0, compressedPayloadSize);
+                
+                byte[] data;
+                if (chunkCompressionType == LRFConstants.COMPRESSION_NONE) {
+                    // If no compression, we must copy to a "permanent" buffer for the entry
+                    data = new byte[compressedPayloadSize];
+                    System.arraycopy(compressedPayload, 0, data, 0, compressedPayloadSize);
+                } else {
+                    try {
+                        data = TurboCompressionService.getInstance().decompress(compressedPayload);
+                    } catch (Exception e) {
+                        System.err.println("[TurboMC][LRF][ERROR] Decompression failed for (" + chunkX + "," + chunkZ + "): " + e.getMessage());
+                        return null;
+                    }
+                }
+                
+                // ... cache logic follows ...
+                return finalizeChunkRead(chunkX, chunkZ, chunkIndex, data);
+            } finally {
+                pool.release(compressedPayload);
             }
+        } finally {
+            pool.release(rawSectorData);
         }
+    }
+    
+    // New helper to handle the trailing logic of readChunk (cache + finalize)
+    private LRFChunkEntry finalizeChunkRead(int chunkX, int chunkZ, int chunkIndex, byte[] data) {
+        if (data == null) return null;
         
         // FIX: Intelligent batch cache eviction with high watermark
-        synchronized (cacheLock) {
-            // High watermark strategy - keep cache at 90% to avoid constant eviction
-            long highWatermark = (long)(MAX_CACHE_MEMORY * 0.9);
+        // Intelligent batch cache eviction with high watermark
+        // High watermark strategy - keep cache at 90% to avoid constant eviction
+        long highWatermark = (long)(MAX_CACHE_MEMORY * 0.9);
+        
+        // If adding would exceed watermark, batch evict down to 80%
+        if (currentCacheSize.get() + data.length > highWatermark) {
+            long targetSize = (long)(MAX_CACHE_MEMORY * 0.8);
+            long toFree = (currentCacheSize.get() + data.length) - targetSize;
             
-            // If adding would exceed watermark, batch evict down to 80%
-            if (currentCacheSize.get() + data.length > highWatermark) {
-                long targetSize = (long)(MAX_CACHE_MEMORY * 0.8);
-                long toFree = (currentCacheSize.get() + data.length) - targetSize;
-                
-                // Batch eviction - free multiple entries in one pass (MUCH faster!)
-                long freed = 0;
-                var iterator = chunkCache.int2ObjectEntrySet().iterator();
-                
-                while (iterator.hasNext() && freed < toFree) {
-                    var entry = iterator.next();
-                    byte[] evictedData = entry.getValue();
-                    iterator.remove();
-                    freed += evictedData.length;
-                    currentCacheSize.addAndGet(-evictedData.length);
-                }
-                
-                if (freed > 0 && System.getProperty("turbomc.debug") != null) {
-                    System.out.println("[TurboMC][LRF][Cache] Batch evicted " + freed / 1024 + 
-                        "KB (now at " + currentCacheSize.get() / 1024 + "KB)");
-                }
+            // Batch eviction - free multiple entries in one pass
+            long freed = 0;
+            var iterator = chunkCache.entrySet().iterator();
+            
+            while (iterator.hasNext() && freed < toFree) {
+                var entry = iterator.next();
+                byte[] evictedData = entry.getValue();
+                iterator.remove();
+                freed += evictedData.length;
+                currentCacheSize.addAndGet(-evictedData.length);
             }
-            
-            // Now add if there's space
-            if (currentCacheSize.get() + data.length <= MAX_CACHE_MEMORY) {
-                chunkCache.put(chunkIndex, data);
+        }
+        
+        // Now add if there's space
+        if (currentCacheSize.get() + data.length <= MAX_CACHE_MEMORY) {
+            if (chunkCache.putIfAbsent(chunkIndex, data) == null) {
                 currentCacheSize.addAndGet(data.length);
             }
         }
@@ -357,22 +367,19 @@ public class LRFRegionReader implements AutoCloseable {
      * Get cache statistics.
      */
     public CacheStats getCacheStats() {
-        synchronized (cacheLock) {
-            return new CacheStats(cacheHits.get(), cacheMisses.get(), chunkCache.size());
-        }
+        return new CacheStats(cacheHits.get(), cacheMisses.get(), chunkCache.size());
     }
     
     /**
      * Clear chunk cache.
      */
     public void clearCache() {
-        synchronized (cacheLock) {
-            if (chunkCache != null) {
-                chunkCache.clear();
-            }
+        if (chunkCache != null) {
+            chunkCache.clear();
         }
         cacheHits.set(0);
         cacheMisses.getAndSet(0);
+        currentCacheSize.set(0);
     }
     
     public static class CacheStats {

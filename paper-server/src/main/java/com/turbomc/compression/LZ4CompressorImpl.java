@@ -37,21 +37,27 @@ public class LZ4CompressorImpl implements Compressor {
             return new byte[]{MAGIC_BYTE, 0, 0, 0, 0};
         }
         
+        com.turbomc.util.BufferPool pool = com.turbomc.util.BufferPool.getInstance();
+        int maxCompressedLength = compressor.maxCompressedLength(data.length);
+        byte[] compressed = pool.acquire(maxCompressedLength);
+        
         try {
-            int maxCompressedLength = compressor.maxCompressedLength(data.length);
-            byte[] compressed = new byte[maxCompressedLength];
-            
             int compressedLength = compressor.compress(data, 0, data.length, compressed, 0, maxCompressedLength);
             
             // Format: [magic byte (1)] [original size (4)] [compressed data]
-            ByteBuffer buffer = ByteBuffer.allocate(1 + 4 + compressedLength);
-            buffer.put(MAGIC_BYTE);
-            buffer.putInt(data.length);
-            buffer.put(compressed, 0, compressedLength);
+            byte[] result = new byte[1 + 4 + compressedLength];
+            result[0] = MAGIC_BYTE;
+            result[1] = (byte) (data.length >>> 24);
+            result[2] = (byte) (data.length >>> 16);
+            result[3] = (byte) (data.length >>> 8);
+            result[4] = (byte) data.length;
+            System.arraycopy(compressed, 0, result, 5, compressedLength);
             
-            return buffer.array();
+            return result;
         } catch (Exception e) {
             throw new CompressionException("LZ4 compression failed", e);
+        } finally {
+            pool.release(compressed);
         }
     }
     

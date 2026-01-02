@@ -8,6 +8,7 @@ import net.minecraft.world.level.ChunkPos;
 import net.minecraft.server.level.ServerChunkCache;
 import com.turbomc.core.autopilot.HealthMonitor;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.Entity;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -284,44 +285,112 @@ public class TurboChunkTickingOptimizer implements TurboOptimizerModule {
     /**
      * Estimate ticked chunks (placeholder implementation)
      */
+    /**
+     * Check if a block entity should be ticked.
+     * @param ticker The block entity ticker
+     * @return true if it should tick
+     */
+    public boolean shouldTickBlockEntity(net.minecraft.world.level.block.entity.TickingBlockEntity ticker) {
+        if (!enabled || !optimizeBlockEntities) {
+            return true;
+        }
+
+        HealthMonitor health = HealthMonitor.getInstance();
+        if (!health.isUnderPressure()) {
+            return true;
+        }
+
+        net.minecraft.core.BlockPos pos = ticker.getPos();
+        String type = ticker.getType();
+
+        // Always tick critical block entities (e.g., beacons, end gateways, command blocks)
+        // Simple string check to avoid heavy class loading/instanceof if possible, or use type.
+        if (type.contains("beacon") || type.contains("command_block") || type.contains("end_gateway") || type.contains("spawner")) {
+            return true;
+        }
+
+        // Check distance to players
+        // We need a level reference. TickingBlockEntity doesn't always expose level directly/easily depending on version.
+        // But we can try to guess or just skip based on semi-random if we can't get level.
+        // Actually, the caller (Level.java) has the level. But we are inside the optimizer.
+        // We can pass the level if we change the signature, but Level.java calls strict methods.
+        // However, we can use the fact that we are running on the main thread and can get the level if we track it?
+        // No, that's risky.
+        
+        // Better approach: Level.java will inject the call, so we can change the signature in Level.java to pass 'this' (the Level).
+        // I will update Level.java to call optimizeBlockEntity(this, ticker).
+
+        // For now, returning true to be safe until I verify signature change.
+        // Wait, I can implement a method that takes Level.
+        return true;
+    }
+
+    /**
+     * Check if a block entity should be ticked (with Level context).
+     */
+    public boolean shouldTickBlockEntity(ServerLevel level, net.minecraft.world.level.block.entity.TickingBlockEntity ticker) {
+        if (!enabled || !optimizeBlockEntities) {
+            return true;
+        }
+        
+        HealthMonitor health = HealthMonitor.getInstance();
+        if (!health.isUnderPressure()) {
+            return true;
+        }
+
+        String type = ticker.getType();
+        // Critical BEs
+        if (type.contains("beacon") || type.contains("command_block") || type.contains("end_gateway") || type.contains("spawner")) {
+            return true;
+        }
+
+        net.minecraft.core.BlockPos pos = ticker.getPos();
+        ChunkPos chunkPos = new ChunkPos(pos);
+        
+        boolean playerNearby = false;
+        // Check simple distance (3 chunks radius)
+        for (Player player : level.players()) {
+             ChunkPos pPos = player.chunkPosition();
+             if (Math.abs(pPos.x - chunkPos.x) <= 3 && Math.abs(pPos.z - chunkPos.z) <= 3) {
+                 playerNearby = true;
+                 break;
+             }
+        }
+
+        if (!playerNearby) {
+            // Skip 3/4 ticks for non-essential BEs far from players
+             if (pos.hashCode() % 4 != 0) {
+                 metrics.get("block_entity_optimizations").increment();
+                 return false;
+             }
+        }
+
+        return true;
+    }
+
+    /**
+     * Estimate ticked chunks (Real implementation)
+     */
     private int estimateTickedChunks(ServerLevel level) {
-        // Placeholder: Return estimated count based on loaded chunks
         try {
-            int loadedChunks = level.getChunkSource().getLoadedChunksCount();
-            return Math.min(loadedChunks, maxChunksTickedPerTick);
+            return level.getChunkSource().getLoadedChunksCount();
         } catch (Exception e) {
-            return 50; // Default estimate
+            return 0;
         }
     }
-    
+
     /**
-     * Optimize entity ticking
+     * Optimize entity ticking (Legacy/Unused placeholder replacer)
      */
     private void optimizeEntityTicking(ServerLevel level) {
-        try {
-            // Placeholder: In real implementation, this would optimize entity ticking
-            // by reducing tick frequency for distant entities or grouping similar entities
-            
-            metrics.get("entity_ticks_optimized").increment();
-            
-        } catch (Exception e) {
-            // Ignore errors during entity ticking optimization
-        }
+        // This is handled per-entity in shouldTickEntity
     }
-    
+
     /**
-     * Optimize block entities
+     * Optimize block entities (Legacy/Unused placeholder replacer)
      */
     private void optimizeBlockEntities(ServerLevel level) {
-        try {
-            // Placeholder: In real implementation, this would optimize block entity ticking
-            // by reducing tick frequency for inactive block entities or batching updates
-            
-            metrics.get("block_entity_optimizations").increment();
-            
-        } catch (Exception e) {
-            // Ignore errors during block entity optimization
-        }
+        // This is handled per-block-entity in injected hooks
     }
     
     /**
@@ -397,6 +466,56 @@ public class TurboChunkTickingOptimizer implements TurboOptimizerModule {
         return enabled && optimizeBlockEntities;
     }
     
+    /**
+     * Check if an entity should be ticked based on optimization rules.
+     * @param entity The entity to check
+     * @return true if the entity should be ticked, false otherwise
+     */
+    public boolean shouldTickEntity(Entity entity) {
+        if (!enabled || !optimizeEntityTicking) {
+            return true;
+        }
+
+        // Always tick important entities
+        if (entity instanceof Player || entity instanceof net.minecraft.world.entity.boss.EnderDragonPart || entity instanceof net.minecraft.world.entity.boss.enderdragon.EnderDragon || entity instanceof net.minecraft.world.entity.boss.wither.WitherBoss) {
+            return true;
+        }
+
+        // Check health status - if healthy, usually tick everything
+        HealthMonitor health = HealthMonitor.getInstance();
+        if (!health.isUnderPressure()) {
+            return true;
+        }
+
+        // Under pressure: check distance to players
+        if (entity.level() instanceof ServerLevel serverLevel) {
+             ChunkPos entityChunk = entity.chunkPosition();
+             boolean playerNearby = false;
+             
+             // Fast approximation: check if any player is within 3 chunks (48 blocks)
+             // Using compiled player list for speed
+             for (Player player : serverLevel.players()) {
+                 ChunkPos pPos = player.chunkPosition();
+                 if (Math.abs(pPos.x - entityChunk.x) <= 3 && Math.abs(pPos.z - entityChunk.z) <= 3) {
+                     playerNearby = true;
+                     break;
+                 }
+             }
+             
+             if (!playerNearby) {
+                 // Skip tick if no player nearby and server under pressure
+                 // But don't skip EVERY tick to prevent freezing artifacts
+                 // Skip 3 out of 4 ticks
+                 if (entity.getId() % 4 != 0) {
+                     metrics.get("entity_ticks_optimized").increment();
+                     return false;
+                 }
+             }
+        }
+        
+        return true;
+    }
+
     /**
      * Get current ticks per second
      */

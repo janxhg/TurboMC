@@ -16,6 +16,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
+import org.bukkit.World;
 
 /**
  * HyperView Chunk Prefetcher.
@@ -129,7 +130,14 @@ public class ChunkPrefetcher {
                             // We use a non-blocking check if possible
                             if (!isChunkGenerated(cx, cz)) {
                                 // Priority 8 (HYPERVIEW_PREFETCH) via UnifiedQueue
-                                generator.queueGeneration(cx, cz, 8);
+                                generator.queueGeneration(cx, cz, 8).thenAccept(chunk -> {
+                                    if (chunk != null) {
+                                        // Fix for GC Thrashing/Freezes:
+                                        // Immediately request unload of LRF-warmed chunks.
+                                        // unloadChunkRequest is safe to call from any thread on Paper.
+                                        world.getWorld().unloadChunkRequest(cx, cz);
+                                    }
+                                });
                                 chunksQueued++;
                                 playerQueued++;
                             }

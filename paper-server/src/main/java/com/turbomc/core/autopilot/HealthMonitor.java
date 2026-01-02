@@ -28,10 +28,18 @@ public class HealthMonitor {
         instance = null;
     }
 
+    private static final long CAPTURE_CACHE_TTL_MS = 500; // Cache for 500ms
+    private volatile long lastCaptureTime = 0;
+
     /**
-     * Captures current server health.
+     * Captures current server health (cached for performance).
      */
     public HealthSnapshot capture() {
+        long now = System.currentTimeMillis();
+        if (now - lastCaptureTime < CAPTURE_CACHE_TTL_MS) {
+            return lastSnapshot.get();
+        }
+        
         MinecraftServer server = MinecraftServer.getServer();
         if (server == null) return lastSnapshot.get();
 
@@ -48,6 +56,7 @@ public class HealthMonitor {
         
         HealthSnapshot snapshot = new HealthSnapshot(mspt, tps);
         lastSnapshot.set(snapshot);
+        lastCaptureTime = now;
         return snapshot;
     }
 

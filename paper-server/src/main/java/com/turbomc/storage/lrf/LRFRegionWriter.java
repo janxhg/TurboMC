@@ -256,13 +256,21 @@ public class LRFRegionWriter implements AutoCloseable {
             // Upgrade to write lock for header modifications
             stamp = headerLock.writeLock();
             try {
-                // Write length header (4 bytes) - Total length = 4 + compressedData.length + 1 (compression type)
+                com.turbomc.util.BufferPool pool = com.turbomc.util.BufferPool.getInstance();
+                
+                // Write length header (5 bytes: 4 length + 1 compression type)
                 int totalLength = 4 + 1 + compressedData.length;
-                ByteBuffer lengthBuffer = ByteBuffer.allocate(5);
-                lengthBuffer.putInt(totalLength);
-                lengthBuffer.put((byte)actualCompressionType);  // FIX #5: Store actual compression used
-                lengthBuffer.flip();
-                channel.write(lengthBuffer);
+                byte[] lengthHeader = pool.acquire(5);
+                try {
+                    lengthHeader[0] = (byte) (totalLength >>> 24);
+                    lengthHeader[1] = (byte) (totalLength >>> 16);
+                    lengthHeader[2] = (byte) (totalLength >>> 8);
+                    lengthHeader[3] = (byte) totalLength;
+                    lengthHeader[4] = (byte) actualCompressionType;
+                    channel.write(ByteBuffer.wrap(lengthHeader, 0, 5));
+                } finally {
+                    pool.release(lengthHeader);
+                }
                 
                 // Write chunk data with buffer
                 writeWithBuffer(compressedData);

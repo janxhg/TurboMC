@@ -134,45 +134,49 @@ public class UnifiedChunkQueue {
         
         // Deduplication check
         if (enableDeduplication) {
-            ChunkTask[] result = new ChunkTask[1];
-            activeTasks.compute(chunkKey, (key, existing) -> {
-                if (existing != null) {
-                    if (type.priority < existing.type.priority) {
-                        requestTasks.remove(existing.requestId);
-                        // Do not decrement activeTaskCount here because we are technically replacing one with another
-                        // Wait, if we replace, we might remove the old one from queue?
-                        // PriorityBlockingQueue.remove is O(N). Avoiding it is better.
-                        // We will mark old task cancelled or just let it run?
-                        // Current logic in original code just returned null to replace? 
-                        // "return null" in compute removes the mapping. 
-                        // So we remove existing, then we will add new.
+            ChunkTask existing = activeTasks.get(chunkKey);
+            if (existing != null) {
+                if (type.priority < existing.type.priority) {
+                    // Current request is more important, try to replace
+                    ChunkTask newTask = new ChunkTask(pos, type, world, requestId);
+                    if (activeTasks.replace(chunkKey, existing, newTask)) {
+                        requestTasks.remove(existing.requestId); // Remove old request mapping
+                        requestTasks.put(requestId, newTask); // Add new request mapping
+                        taskQueue.remove(existing); // Remove old task from queue (O(N) but necessary for priority change)
+                        taskQueue.offer(newTask); // Add new task to queue
                         totalDeduplicated.incrementAndGet();
-                        activeTaskCount.decrementAndGet(); 
-                        return null; 
+                        // activeTaskCount remains the same as one task is replaced by another
+                        totalQueued.incrementAndGet(); // Count the new task as queued
+                        return newTask.future; // Return future of the new, higher-priority task
+                    } else {
+                        // Replacement failed, another thread modified it. Retry.
+                        return queueTask(pos, type, world, requestId);
                     }
-                    result[0] = existing;
-                    return existing;
                 }
-                return null;
-            });
+                // Existing task is better or equal, return its future
+                return existing.future;
+            }
             
-            if (result[0] != null) {
-                return result[0].future;
+            // No existing task, try to put a new one
+            ChunkTask newTask = new ChunkTask(pos, type, world, requestId);
+            if (activeTasks.putIfAbsent(chunkKey, newTask) == null) { // Atomically add if not present
+                taskQueue.offer(newTask);
+                requestTasks.put(requestId, newTask);
+                activeTaskCount.incrementAndGet();
+                totalQueued.incrementAndGet();
+                return newTask.future;
+            } else {
+                // Another thread just put a task for this chunk, retry.
+                return queueTask(pos, type, world, requestId);
             }
         }
         
+        // Deduplication disabled
         ChunkTask task = new ChunkTask(pos, type, world, requestId);
-        
-        if (enableDeduplication) {
-            activeTasks.put(chunkKey, task);
-            requestTasks.put(requestId, task);
-            activeTaskCount.incrementAndGet();
-        } else {
-             // Even if deduplication disabled, we might want to track count?
-             // Original code only put in map if deduplication enabled.
-             // If deduplication disabled, we rely on taskQueue size?
-        }
-        
+        // When deduplication is disabled, we don't use activeTasks for tracking,
+        // but we still track by requestId and increment activeTaskCount.
+        requestTasks.put(requestId, task);
+        activeTaskCount.incrementAndGet();
         taskQueue.offer(task);
         totalQueued.incrementAndGet();
         
@@ -180,7 +184,12 @@ public class UnifiedChunkQueue {
     }
     
     public ChunkTask getNextTask() {
-        return taskQueue.poll();
+        try {
+            return taskQueue.take(); // Blocking - avoids busy-spinning
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
     }
     
     public void completeTask(ChunkTask task, boolean success) {

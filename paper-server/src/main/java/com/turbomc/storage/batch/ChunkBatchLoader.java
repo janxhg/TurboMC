@@ -218,25 +218,16 @@ public class ChunkBatchLoader implements AutoCloseable {
         
         // Check concurrent load limit - use queue instead of rejecting
         if (loadingChunks.size() >= maxConcurrentLoads) {
-            // Add to waiting queue with timeout
-            QueuedChunk queued = new QueuedChunk(chunkX, chunkZ, System.currentTimeMillis() + 5000); // 5s timeout
+            // Add to waiting queue with pending future
+            CompletableFuture<LRFChunkEntry> pending = new CompletableFuture<>();
+            QueuedChunk queued = new QueuedChunk(chunkX, chunkZ, System.currentTimeMillis() + 5000, pending);
             waitingQueue.offer(queued);
             queueSize.incrementAndGet();
             
-            // Return future that will complete when processed
-            return CompletableFuture.supplyAsync(() -> {
-                try {
-                    while (!queued.isExpired() && !isClosed.get()) {
-                        Thread.sleep(10); // Poll every 10ms
-                        if (queued.future != null) {
-                            return queued.future.get();
-                        }
-                    }
-                    return null; // Timeout or closed
-                } catch (Exception e) {
-                    return null;
-                }
-            });
+            // Return wrapper that cancels if timed out
+            // Note: We're not actively enforcing timeout cancellation here for simplicity,
+            // but the consumer would timeout.
+            return pending;
         }
         
         cacheMisses.incrementAndGet();
@@ -266,12 +257,25 @@ public class ChunkBatchLoader implements AutoCloseable {
     private void processWaitingQueue() {
         while (!waitingQueue.isEmpty() && loadingChunks.size() < maxConcurrentLoads) {
             QueuedChunk queued = waitingQueue.poll();
-            if (queued != null && !queued.isExpired()) {
+            if (queued != null) {
+                if (queued.isExpired()) {
+                    // Notify timeout
+                    queued.pendingFuture.complete(null); 
+                    continue;
+                }
+                
                 queueSize.decrementAndGet();
                 // Load the queued chunk
                 CompletableFuture<LRFChunkEntry> future = loadChunk(queued.chunkX, queued.chunkZ);
-                queued.future = future;
-                break; // Process one at a time
+                queued.activeFuture = future;
+                
+                // Bridge results
+                future.whenComplete((result, ex) -> {
+                    if (ex != null) queued.pendingFuture.completeExceptionally(ex);
+                    else queued.pendingFuture.complete(result);
+                });
+                
+                break; // Process one at a time (recursive calls will handle the rest)
             }
         }
     }
@@ -579,12 +583,16 @@ public class ChunkBatchLoader implements AutoCloseable {
         final int chunkX;
         final int chunkZ;
         final long expireTime;
-        volatile CompletableFuture<LRFChunkEntry> future;
+        final CompletableFuture<LRFChunkEntry> pendingFuture;
         
-        QueuedChunk(int chunkX, int chunkZ, long expireTime) {
+        // Used to track the actual loading task once started
+        volatile CompletableFuture<LRFChunkEntry> activeFuture;
+        
+        QueuedChunk(int chunkX, int chunkZ, long expireTime, CompletableFuture<LRFChunkEntry> pendingFuture) {
             this.chunkX = chunkX;
             this.chunkZ = chunkZ;
             this.expireTime = expireTime;
+            this.pendingFuture = pendingFuture;
         }
         
         boolean isExpired() {

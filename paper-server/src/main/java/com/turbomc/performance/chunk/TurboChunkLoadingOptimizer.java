@@ -143,6 +143,13 @@ public class TurboChunkLoadingOptimizer {
         }
         return result;
     }
+
+    /**
+     * Check if optimizations are enabled.
+     */
+    public boolean isEnabled() {
+        return optimizationsEnabled.get();
+    }
     
     /**
      * Initialize chunk loading optimizer.
@@ -158,6 +165,7 @@ public class TurboChunkLoadingOptimizer {
         if (optimizationsEnabled.get()) {
             setupChunkCaches();
             startPerformanceMonitoring();
+            startQueueProcessor();
         }
         
         System.out.println("[TurboMC][Chunk] Chunk loading optimization system active.");
@@ -198,86 +206,186 @@ public class TurboChunkLoadingOptimizer {
     /**
      * Load a chunk with optimizations.
      */
+    /**
+     * Load a chunk with optimizations (Queue Integrated).
+     */
     public CompletableFuture<ChunkLoadResult> loadChunkOptimized(String worldName, ChunkPos chunkPos, String targetStatus) {
         if (!optimizationsEnabled.get()) {
             return loadChunkVanilla(worldName, chunkPos, targetStatus);
         }
-        
-        long startTime = System.nanoTime();
-        currentLoadingChunks.incrementAndGet();
         
         // Check cache first
         if (cachingEnabled) {
             ChunkCache cache = getChunkCache(worldName);
             ChunkLoadResult cachedResult = cache.get(chunkPos, targetStatus);
             if (cachedResult != null) {
-                currentLoadingChunks.decrementAndGet();
-                updateMetrics(worldName, System.nanoTime() - startTime, true);
                 return CompletableFuture.completedFuture(cachedResult);
             }
         }
+
+        // Determine priority based on status/context
+        com.turbomc.storage.optimization.UnifiedChunkQueue.TaskType taskType = 
+            com.turbomc.storage.optimization.UnifiedChunkQueue.TaskType.BACKGROUND_GENERATION;
+            
+        if (targetStatus.equals("FULL") || targetStatus.equals("minecraft:full")) {
+             if (priorityLoadingEnabled) {
+                 taskType = com.turbomc.storage.optimization.UnifiedChunkQueue.TaskType.PRIORITY_LOAD;
+             }
+        }
+
+        // Use UnifiedChunkQueue
+        com.turbomc.storage.optimization.UnifiedChunkQueue queue = com.turbomc.storage.optimization.UnifiedChunkQueue.getInstance();
+        String requestId = worldName + ":" + chunkPos.x + ":" + chunkPos.z + ":" + System.nanoTime();
         
-        // Determine loading priority
-        LoadPriority priority = determineLoadPriority(worldName, chunkPos);
-        
-        // Load with appropriate strategy
-        CompletableFuture<ChunkLoadResult> future;
-        if (priorityLoadingEnabled && priority == LoadPriority.HIGH) {
-            future = loadChunkHighPriority(worldName, chunkPos, targetStatus);
-        } else if (parallelGenerationEnabled) {
-            future = loadChunkParallel(worldName, chunkPos, targetStatus);
-        } else {
-            future = loadChunkVanilla(worldName, chunkPos, targetStatus);
+        ServerLevel level = null;
+        net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
+        for (ServerLevel l : server.getAllLevels()) {
+            if (l.serverLevelData.getLevelName().equals(worldName)) {
+                level = l;
+                break;
+            }
         }
         
-        // Handle completion
-        return future.thenApply(result -> {
-            currentLoadingChunks.decrementAndGet();
-            long loadTime = System.nanoTime() - startTime;
-            
-            if (result != null && cachingEnabled) {
-                // Cache the result
-                ChunkCache cache = getChunkCache(worldName);
-                cache.put(chunkPos, targetStatus, result);
-            }
-            
-            updateMetrics(worldName, loadTime, true);
-            
-            // Trigger preloading if enabled
-            if (preloadingEnabled) {
-                triggerPreloading(worldName, chunkPos);
-            }
-            
-            return result;
+        if (level == null) return loadChunkVanilla(worldName, chunkPos, targetStatus);
+
+        CompletableFuture<ChunkLoadResult> finalFuture = new CompletableFuture<>();
+        final ChunkLoadRequest request = new ChunkLoadRequest(chunkPos, targetStatus, worldName, finalFuture);
+        pendingRequests.put(requestId, request);
+        currentLoadingChunks.incrementAndGet();
+
+        queue.queueTask(chunkPos, taskType, level, requestId).thenAccept(success -> {
+             if (!success) {
+                 pendingRequests.remove(requestId);
+                 currentLoadingChunks.decrementAndGet();
+                 finalFuture.complete(new ChunkLoadResult(chunkPos, targetStatus, false, 0));
+             }
         });
+
+        return finalFuture;
+    }
+
+    private final ConcurrentHashMap<String, ChunkLoadRequest> pendingRequests = new ConcurrentHashMap<>();
+
+    private static class ChunkLoadRequest {
+        final ChunkPos pos;
+        final String status;
+        final String world;
+        final CompletableFuture<ChunkLoadResult> future;
+        final long startTime = System.nanoTime();
+
+        ChunkLoadRequest(ChunkPos pos, String status, String world, CompletableFuture<ChunkLoadResult> future) {
+             this.pos = pos;
+             this.status = status;
+             this.world = world;
+             this.future = future;
+        }
+    }
+
+    private void startQueueProcessor() {
+        Thread processor = new Thread(() -> {
+            com.turbomc.storage.optimization.UnifiedChunkQueue queue = com.turbomc.storage.optimization.UnifiedChunkQueue.getInstance();
+            while (optimizationsEnabled.get()) {
+                try {
+                    com.turbomc.storage.optimization.UnifiedChunkQueue.ChunkTask task = queue.getNextTask();
+                    if (task != null) {
+                         processTask(task);
+                    }
+                    // getNextTask() is now blocking, so no need to sleep
+                } catch (Exception e) {
+                     e.printStackTrace();
+                }
+            }
+        }, "Turbo-Queue-Processor");
+        processor.setDaemon(true);
+        processor.start();
+    }
+
+    private void processTask(com.turbomc.storage.optimization.UnifiedChunkQueue.ChunkTask task) {
+        String requestId = task.requestId;
+        ChunkLoadRequest request = pendingRequests.get(requestId);
+        
+        if (request != null) {
+             java.nio.file.Path regionPath = resolveRegionPath(request.world);
+             if (regionPath != null) {
+                  TurboStorageManager.getInstance().loadChunk(regionPath, request.pos.x, request.pos.z)
+                      .thenAccept(entry -> {
+                           long duration = System.nanoTime() - request.startTime;
+                           boolean success = (entry != null && entry.getData() != null);
+                           ChunkLoadResult result = new ChunkLoadResult(request.pos, request.status, success, duration);
+                           
+                           if (cachingEnabled && success) {
+                               getChunkCache(request.world).put(request.pos, request.status, result);
+                           }
+                           
+                           updateMetrics(request.world, duration, success);
+                           currentLoadingChunks.decrementAndGet();
+                           request.future.complete(result);
+                           pendingRequests.remove(requestId);
+                           com.turbomc.storage.optimization.UnifiedChunkQueue.getInstance().completeTask(task, success);
+                      });
+             } else {
+                 request.future.complete(new ChunkLoadResult(request.pos, request.status, false, 0));
+                 pendingRequests.remove(requestId);
+                 currentLoadingChunks.decrementAndGet();
+                 com.turbomc.storage.optimization.UnifiedChunkQueue.getInstance().completeTask(task, false);
+             }
+        } else {
+             com.turbomc.storage.optimization.UnifiedChunkQueue.getInstance().completeTask(task, false);
+        }
     }
     
+    /**
+     * Resolve region path for a world name.
+     */
+    private java.nio.file.Path resolveRegionPath(String worldName) {
+        net.minecraft.server.MinecraftServer server = net.minecraft.server.MinecraftServer.getServer();
+        for (ServerLevel level : server.getAllLevels()) {
+            // Check approximate name match
+            String levelName = level.serverLevelData.getLevelName(); // e.g. "world"
+            if (levelName.equals(worldName) || level.dimension().location().getPath().equals(worldName)) {
+                return level.levelStorageAccess.getDimensionPath(level.dimension()).resolve("region");
+            }
+        }
+        return null;
+    }
+
     /**
      * Load chunk with high priority.
      */
     private CompletableFuture<ChunkLoadResult> loadChunkHighPriority(String worldName, ChunkPos chunkPos, String targetStatus) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                // High priority loading - less delay, more resources
-                return new ChunkLoadResult(chunkPos, targetStatus, true, System.currentTimeMillis());
-            } catch (Exception e) {
-                return new ChunkLoadResult(chunkPos, targetStatus, false, System.currentTimeMillis());
-            }
-        });
+        java.nio.file.Path regionPath = resolveRegionPath(worldName);
+        if (regionPath == null) {
+            return CompletableFuture.completedFuture(new ChunkLoadResult(chunkPos, targetStatus, false, 0));
+        }
+
+        long startTime = System.nanoTime();
+        // High priority: Delegate to Storage Manager (which handles MMap/Batch/Direct)
+        // Ideally we would signal priority to the manager, but for now getting real data is the upgrade.
+        return TurboStorageManager.getInstance().loadChunk(regionPath, chunkPos.x, chunkPos.z)
+            .thenApply(entry -> {
+                long duration = System.nanoTime() - startTime;
+                boolean success = (entry != null && entry.getData() != null);
+                return new ChunkLoadResult(chunkPos, targetStatus, success, duration);
+            });
     }
     
     /**
      * Load chunk with parallel generation.
      */
     private CompletableFuture<ChunkLoadResult> loadChunkParallel(String worldName, ChunkPos chunkPos, String targetStatus) {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                // Parallel generation - multiple threads working together
-                return new ChunkLoadResult(chunkPos, targetStatus, true, System.currentTimeMillis());
-            } catch (Exception e) {
-                return new ChunkLoadResult(chunkPos, targetStatus, false, System.currentTimeMillis());
-            }
-        });
+        java.nio.file.Path regionPath = resolveRegionPath(worldName);
+        if (regionPath == null) {
+            return CompletableFuture.completedFuture(new ChunkLoadResult(chunkPos, targetStatus, false, 0));
+        }
+
+        long startTime = System.nanoTime();
+        // Parallel load: Delegate to Storage Manager
+        return TurboStorageManager.getInstance().loadChunk(regionPath, chunkPos.x, chunkPos.z)
+            .thenApply(entry -> {
+                long duration = System.nanoTime() - startTime;
+                boolean success = (entry != null && entry.getData() != null);
+                return new ChunkLoadResult(chunkPos, targetStatus, success, duration);
+            });
     }
     
     /**

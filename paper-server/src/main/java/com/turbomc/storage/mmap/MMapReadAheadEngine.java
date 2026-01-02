@@ -101,6 +101,11 @@ public class MMapReadAheadEngine implements AutoCloseable {
     private final com.turbomc.streaming.IntentPredictor intentPredictor;
     private final com.turbomc.storage.lod.LODManager lodManager; // TurboMC - LOD Manager
     private final FlushBarrier flushBarrier; // TurboMC - Synchronization barrier
+    
+    // FIX: Prefetch spam prevention
+    private volatile long lastPrefetchTime = 0;
+    private volatile int lastPrefetchX = Integer.MIN_VALUE;
+    private volatile int lastPrefetchZ = Integer.MIN_VALUE;
 
     
 
@@ -323,73 +328,79 @@ public class MMapReadAheadEngine implements AutoCloseable {
             }
             
             // Read from memory-mapped buffer
-            byte[] data = new byte[size];
-            if (mappedBuffer != null && offset + size <= mappedBuffer.limit()) {
-                try {
-                    // Optimized concurrent access - absolute get available in Java 13+ (Minecraft 1.21 uses Java 21)
-                    mappedBuffer.get(offset, data);
-                } catch (Exception e) {
-                    // Fallback to standard I/O if mmap access fails (rare race)
-                    ByteBuffer buffer = ByteBuffer.wrap(data);
-                    fileChannel.read(buffer, offset);
-                }
-            } else {
-                // Fallback to standard I/O if not mapped or beyond mapping limit (file growth)
-                int bytesRead = 0;
-                int retries = 0;
-                while (bytesRead < size && retries < 3) {
-                    ByteBuffer buffer = ByteBuffer.wrap(data, bytesRead, size - bytesRead);
-                    int read = fileChannel.read(buffer, offset + bytesRead);
-                    if (read <= 0) {
-                        if (retries < 2) {
-                            try { Thread.sleep(5); } catch (InterruptedException ignored) {}
-                        }
-                        retries++;
-                        continue;
+            com.turbomc.util.BufferPool pool = com.turbomc.util.BufferPool.getInstance();
+            byte[] data = pool.acquire(size);
+            
+            try {
+                if (mappedBuffer != null && offset + size <= mappedBuffer.limit()) {
+                    try {
+                        // Optimized concurrent access
+                        mappedBuffer.get(offset, data);
+                    } catch (Exception e) {
+                        // Fallback to standard I/O if mmap access fails (rare race)
+                        ByteBuffer buffer = ByteBuffer.wrap(data);
+                        fileChannel.read(buffer, offset);
                     }
-                    bytesRead += read;
+                } else {
+                    // Fallback to standard I/O if not mapped or beyond mapping limit (file growth)
+                    int bytesRead = 0;
+                    int retries = 0;
+                    while (bytesRead < size && retries < 3) {
+                        ByteBuffer buffer = ByteBuffer.wrap(data, bytesRead, size - bytesRead);
+                        int read = fileChannel.read(buffer, offset + bytesRead);
+                        if (read <= 0) {
+                            if (retries < 2) {
+                                try { Thread.sleep(5); } catch (InterruptedException ignored) {}
+                            }
+                            retries++;
+                            continue;
+                        }
+                        bytesRead += read;
+                    }
+                    
+                    if (bytesRead < size) {
+                        return null; // Avoid processing partial data
+                    }
                 }
                 
-                if (bytesRead < size) {
-                    return null; // Avoid processing partial data
+                // Parse Local Chunk Header (5 bytes: 4 length + 1 type)
+                int actualLength = ((data[0] & 0xFF) << 24) | 
+                                  ((data[1] & 0xFF) << 16) | 
+                                  ((data[2] & 0xFF) << 8) | 
+                                  (data[3] & 0xFF);
+                int localType = data[4] & 0xFF;
+                
+                // Validate length
+                if (actualLength <= 0 || actualLength > size) {
+                     if (actualLength > size) {
+                         throw new IOException("Chunk length (" + actualLength + ") exceeds allocated sector size (" + size + ")");
+                     }
                 }
+                
+                int payloadSize = actualLength - 5;
+                if (payloadSize < 0) {
+                     throw new IOException("Invalid chunk payload size: " + payloadSize);
+                }
+                
+                byte[] payload = pool.acquire(payloadSize);
+                try {
+                    System.arraycopy(data, 5, payload, 0, payloadSize);
+                    
+                    // Decompress if needed
+                    if (localType != LRFConstants.COMPRESSION_NONE) {
+                        return TurboCompressionService.getInstance().decompress(payload);
+                    }
+                    
+                    // If no compression, we must return a fresh copy because payload belongs to pool
+                    byte[] copy = new byte[payloadSize];
+                    System.arraycopy(payload, 0, copy, 0, payloadSize);
+                    return copy;
+                } finally {
+                    pool.release(payload);
+                }
+            } finally {
+                pool.release(data);
             }
-            
-            // Parse Local Chunk Header (5 bytes)
-            // [Length: 4 bytes] [CompressionType: 1 byte] [Payload: N bytes]
-            // Note: header.getChunkSize() returns aligned sector size (4KB), 
-            // so we MUST read the actual length from the local header.
-            int actualLength = ByteBuffer.wrap(data, 0, 4).getInt();
-            int localType = data[4];
-            
-            // Validate length
-            if (actualLength <= 0 || actualLength > size) {
-                 // Corrupt data or race condition?
-                 // If actualLength > size (allocated sector space), it's definitely corrupt.
-                 // But for now, let's respect the local header if within bounds.
-                 if (actualLength > size) {
-                     throw new IOException("Chunk length (" + actualLength + ") exceeds allocated sector size (" + size + ")");
-                 }
-            }
-            
-            // Extract payload
-            // actualLength includes the 4 length bytes, so payload start is at 5.
-            // Payload size = actualLength - 4 (length bytes) - 1 (type byte) = actualLength - 5.
-            int payloadSize = actualLength - 5;
-            
-            if (payloadSize < 0) {
-                 throw new IOException("Invalid chunk payload size: " + payloadSize);
-            }
-            
-            byte[] payload = new byte[payloadSize];
-            System.arraycopy(data, 5, payload, 0, payloadSize);
-            
-            // Decompress if needed (Use local type as authority)
-            if (localType != LRFConstants.COMPRESSION_NONE) {
-                return TurboCompressionService.getInstance().decompress(payload);
-            }
-            
-            return payload;
         } catch (Exception e) {
             throw new IOException("Failed to read chunk " + chunkX + "," + chunkZ, e);
         }
@@ -496,6 +507,16 @@ public class MMapReadAheadEngine implements AutoCloseable {
         if (isClosed.get()) {
             return;
         }
+        
+        // FIX: Only prefetch if moved or 1 second passed
+        long currentTime = System.currentTimeMillis();
+        if (centerX == lastPrefetchX && centerZ == lastPrefetchZ &&
+            currentTime - lastPrefetchTime < 1000) {
+            return;
+        }
+        lastPrefetchTime = currentTime;
+        lastPrefetchX = centerX;
+        lastPrefetchZ = centerZ;
         
         // Update vector calculation (Legacy mechanism for stats/compatibility, kept for now)
         int lastX = lastAccessX.getAndSet(centerX);

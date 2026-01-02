@@ -25,8 +25,8 @@ public class LRFHeader {
     private final int version;
     private final int chunkCount;
     private final int compressionType;
-    // Optimized: Use compact offset/size storage instead of full arrays
-    private final ByteBuffer offsetTable; // 228 bytes compact storage
+    // FIX: Replace synchronized ByteBuffer with lock-free int array
+    private final int[] offsetTable; // 1024 entries, 4KB total
     private final boolean[] chunkExists; // 1024 bits for existence check
     
     
@@ -45,7 +45,7 @@ public class LRFHeader {
      * Create header from compact storage.
      */
     private LRFHeader(int version, int chunkCount, int compressionType, 
-                     ByteBuffer offsetTable, boolean[] chunkExists) {
+                     int[] offsetTable, boolean[] chunkExists) {
         this.version = version;
         this.chunkCount = chunkCount;
         this.compressionType = compressionType;
@@ -62,18 +62,15 @@ public class LRFHeader {
         this.compressionType = compressionType;
         
         // Compact storage: pack offset/size into 4 bytes each
-        this.offsetTable = ByteBuffer.allocate(LRFConstants.OFFSETS_TABLE_SIZE);
+        this.offsetTable = new int[LRFConstants.CHUNKS_PER_REGION];
         this.chunkExists = new boolean[LRFConstants.CHUNKS_PER_REGION];
         
         for (int i = 0; i < LRFConstants.CHUNKS_PER_REGION; i++) {
             int offsetSectors = offsets[i] / 256;
             int sizeSectors = (sizes[i] + 4095) / 4096;
-            int entry = (offsetSectors << 8) | (sizeSectors & 0xFF);
-            offsetTable.putInt(entry);
+            offsetTable[i] = (offsetSectors << 8) | (sizeSectors & 0xFF);
             chunkExists[i] = sizes[i] > 0;
         }
-        
-        offsetTable.rewind();
     }
     
     /**
@@ -85,10 +82,8 @@ public class LRFHeader {
         this.compressionType = compressionType;
         
         // Initialize empty compact storage
-        this.offsetTable = ByteBuffer.allocate(LRFConstants.OFFSETS_TABLE_SIZE);
+        this.offsetTable = new int[LRFConstants.CHUNKS_PER_REGION];
         this.chunkExists = new boolean[LRFConstants.CHUNKS_PER_REGION];
-        
-        offsetTable.rewind();
     }
     
     /**
@@ -121,21 +116,16 @@ public class LRFHeader {
         int chunkCount = buffer.getInt();
         int compressionType = buffer.getInt();
         
-        // Read offset table into compact storage
-        ByteBuffer offsetTable = ByteBuffer.allocate(LRFConstants.OFFSETS_TABLE_SIZE);
-        byte[] tableBytes = new byte[LRFConstants.OFFSETS_TABLE_SIZE];
-        buffer.get(tableBytes);
-        offsetTable.put(tableBytes);
-        offsetTable.rewind();
-        
-        // Build chunk existence array
+        // Read offset table directly into int array (lock-free)
+        int[] offsetTable = new int[LRFConstants.CHUNKS_PER_REGION];
         boolean[] chunkExists = new boolean[LRFConstants.CHUNKS_PER_REGION];
+        
         for (int i = 0; i < LRFConstants.CHUNKS_PER_REGION; i++) {
-            int entry = offsetTable.getInt();
+            int entry = buffer.getInt();
+            offsetTable[i] = entry;
             int sizeSectors = entry & 0xFF;
             chunkExists[i] = sizeSectors > 0;
         }
-        offsetTable.rewind();
         
         // Skip any remaining header padding
         int remaining = LRFConstants.HEADER_SIZE - buffer.position();
@@ -201,10 +191,8 @@ public class LRFHeader {
         int index = LRFConstants.getChunkIndex(chunkX, chunkZ);
         if (!chunkExists[index]) return 0;
         
-        int entry;
-        synchronized (offsetTable) {
-            entry = offsetTable.getInt(index * 4);
-        }
+        // Lock-free array read (atomic for int)
+        int entry = offsetTable[index];
         int offsetSectors = (entry >>> 8) & 0xFFFFFF;
         return offsetSectors * 256;
     }
@@ -220,10 +208,8 @@ public class LRFHeader {
         int index = LRFConstants.getChunkIndex(chunkX, chunkZ);
         if (!chunkExists[index]) return 0;
         
-        int entry;
-        synchronized (offsetTable) {
-            entry = offsetTable.getInt(index * 4);
-        }
+        // Lock-free array read (atomic for int)
+        int entry = offsetTable[index];
         int sizeSectors = entry & 0xFF;
         return sizeSectors * 4096;
     }
@@ -248,9 +234,8 @@ public class LRFHeader {
         int offsetSectors = offset / 256;
         int sizeSectors = (size + 4095) / 4096; // Round up to sectors
         
-        synchronized (offsetTable) {
-            offsetTable.putInt(index * 4, (offsetSectors << 8) | (sizeSectors & 0xFF));
-        }
+        // Lock-free array write (atomic for int)
+        offsetTable[index] = (offsetSectors << 8) | (sizeSectors & 0xFF);
         
         // Update existence flag
         chunkExists[index] = size > 0;
@@ -272,14 +257,10 @@ public class LRFHeader {
      */
     public int[] getOffsets() {
         int[] offsets = new int[LRFConstants.CHUNKS_PER_REGION];
-        synchronized (offsetTable) {
-            offsetTable.rewind();
-            for (int i = 0; i < LRFConstants.CHUNKS_PER_REGION; i++) {
-                int entry = offsetTable.getInt();
-                int offsetSectors = (entry >>> 8) & 0xFFFFFF;
-                offsets[i] = offsetSectors * 256;
-            }
-            offsetTable.rewind();
+        for (int i = 0; i < LRFConstants.CHUNKS_PER_REGION; i++) {
+            int entry = offsetTable[i];
+            int offsetSectors = (entry >>> 8) & 0xFFFFFF;
+            offsets[i] = offsetSectors * 256;
         }
         return offsets;
     }
@@ -289,14 +270,10 @@ public class LRFHeader {
      */
     public int[] getSizes() {
         int[] sizes = new int[LRFConstants.CHUNKS_PER_REGION];
-        synchronized (offsetTable) {
-            offsetTable.rewind();
-            for (int i = 0; i < LRFConstants.CHUNKS_PER_REGION; i++) {
-                int entry = offsetTable.getInt();
-                int sizeSectors = entry & 0xFF;
-                sizes[i] = sizeSectors * 4096;
-            }
-            offsetTable.rewind();
+        for (int i = 0; i < LRFConstants.CHUNKS_PER_REGION; i++) {
+            int entry = offsetTable[i];
+            int sizeSectors = entry & 0xFF;
+            sizes[i] = sizeSectors * 4096;
         }
         return sizes;
     }
