@@ -84,18 +84,25 @@ public class SharedRegionResource implements AutoCloseable {
      * Get the definitively accurate header for this region, with caching.
      */
     public LRFHeader getHeader() throws IOException {
+        long now = System.currentTimeMillis();
+        LRFHeader header = cachedHeader;
+        
+        // Fast path: trust the cache if TTL hasn't expired (2 seconds)
+        if (header != null && (now - lastHeaderRefresh < 2000)) {
+            return header;
+        }
+        
+        // Slow path: check if file changed on disk
         long currentModified;
         try {
             currentModified = java.nio.file.Files.getLastModifiedTime(path).toMillis();
         } catch (IOException e) {
-            currentModified = System.currentTimeMillis();
+            currentModified = now;
         }
         
         long currentSize = channel.size();
-        LRFHeader header = cachedHeader;
-        if (header != null && currentModified <= lastFileModified && 
-            currentSize == lastFileSize && 
-            (System.currentTimeMillis() - lastHeaderRefresh < 2000)) { // Increased TTL to 2s
+        if (header != null && currentModified <= lastFileModified && currentSize == lastFileSize) {
+            lastHeaderRefresh = now; // Update TTL even if header is still fresh
             return header;
         }
         

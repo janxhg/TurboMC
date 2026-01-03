@@ -211,6 +211,15 @@ public class TurboStorageManager implements AutoCloseable {
     }
     
     /**
+     * Resets the singleton instance for testing purposes.
+     */
+    public static void resetInstance() {
+        synchronized (INSTANCE_LOCK) {
+            instance = null;
+        }
+    }
+    
+    /**
      * Dynamically update global executors based on new thread counts.
      * v2.3.9: Support for real-time autopilot adjustments.
      */
@@ -678,7 +687,11 @@ public class TurboStorageManager implements AutoCloseable {
         return regionReaders.computeIfAbsent(finalPath, path -> {
             try {
                 SharedRegionResource resource = getSharedResource(path);
-                return new LRFRegionReader(resource);
+                LRFRegionReader reader = new LRFRegionReader(resource);
+                if (mmapEnabled) {
+                    reader.setCachingEnabled(false);
+                }
+                return reader;
             } catch (IOException e) {
                 System.err.println("[TurboMC][Storage] Failed to create region reader for " + path + ": " + e.getMessage());
                 return null;

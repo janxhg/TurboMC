@@ -42,6 +42,7 @@ public class LRFRegionReader implements AutoCloseable {
     // Stats
     private final AtomicLong cacheHits;
     private final AtomicLong cacheMisses;
+    private boolean cachingEnabled = true;
     
     /**
      * Open an LRF file for reading.
@@ -282,8 +283,8 @@ public class LRFRegionReader implements AutoCloseable {
             }
         }
         
-        // Now add if there's space
-        if (currentCacheSize.get() + data.length <= MAX_CACHE_MEMORY) {
+        // Now add if there's space and caching is enabled
+        if (cachingEnabled && currentCacheSize.get() + data.length <= MAX_CACHE_MEMORY) {
             if (chunkCache.putIfAbsent(chunkIndex, data) == null) {
                 currentCacheSize.addAndGet(data.length);
             }
@@ -305,6 +306,14 @@ public class LRFRegionReader implements AutoCloseable {
      * @return List of all chunk entries
      * @throws IOException if read fails
      */
+    public void setCachingEnabled(boolean enabled) {
+        this.cachingEnabled = enabled;
+        if (!enabled) {
+            chunkCache.clear();
+            currentCacheSize.set(0);
+        }
+    }
+
     public List<LRFChunkEntry> readAllChunks() throws IOException {
         List<LRFChunkEntry> chunks = new ArrayList<>();
         

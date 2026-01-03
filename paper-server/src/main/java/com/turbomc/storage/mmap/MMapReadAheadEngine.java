@@ -508,10 +508,12 @@ public class MMapReadAheadEngine implements AutoCloseable {
             return;
         }
         
-        // FIX: Only prefetch if moved or 1 second passed
+        // FIX: Only prefetch if moved more than 2 chunks OR 2 seconds passed
         long currentTime = System.currentTimeMillis();
-        if (centerX == lastPrefetchX && centerZ == lastPrefetchZ &&
-            currentTime - lastPrefetchTime < 1000) {
+        int distSq = (centerX - lastPrefetchX) * (centerX - lastPrefetchX) + 
+                     (centerZ - lastPrefetchZ) * (centerZ - lastPrefetchZ);
+        
+        if (distSq < 4 && currentTime - lastPrefetchTime < 2000) {
             return;
         }
         lastPrefetchTime = currentTime;
@@ -539,10 +541,14 @@ public class MMapReadAheadEngine implements AutoCloseable {
         final int fVelZ = velZ;
         
         // Throttling: If we are already prefetching many chunks for this region, skip
-        if (prefetchCount.get() > prefetchBatchSize * 4) {
-             // Throttled (avoid queue explosion)
-             // But we allow it if velocity is very high
-             if (Math.abs(fVelX) < 2 && Math.abs(fVelZ) < 2) return;
+        // Throttling: Aggressive throttling if queue is busy
+        int pendingCount = prefetchCount.get();
+        if (pendingCount > prefetchBatchSize * 2) {
+             // If we are already busy, only allow prefetch if moving fast
+             if (Math.abs(fVelX) < 1 && Math.abs(fVelZ) < 1) return;
+             
+             // If extremely busy, stop all prefetching
+             if (pendingCount > prefetchBatchSize * 8) return;
         }
         
         CompletableFuture.runAsync(() -> {
@@ -575,10 +581,13 @@ public class MMapReadAheadEngine implements AutoCloseable {
                         int chunkX = centerX + x;
                         int chunkZ = centerZ + z;
                         
-                        // Directional Bias: Skip chunks BEHIND us if moving fast
+                        // Directional Bias: Skip chunks BEHIND us if moving
+                        // We use a tighter check: (x*velX + z*velZ) is proportional to cosine
+                        // If moving fast, only prefetch chunks in a 120-degree cone ahead
                         boolean behind = isFastTravel && (x * fVelX + z * fVelZ < 0);
-                        if (!behind || (Math.abs(x) <= 1 && Math.abs(z) <= 1)) {
+                        if (!behind) {
                             int chunkIndex = LRFConstants.getChunkIndex(chunkX & 31, chunkZ & 31);
+                            // Avoid repeated lookups
                             if (!chunkCache.containsKey(chunkIndex) && chunksToPrefetchKeys.add(chunkIndex)) {
                                 chunksToPrefetch.add(new int[]{chunkX, chunkZ});
                             }

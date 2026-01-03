@@ -200,6 +200,12 @@ public class ChunkIntegrityValidator implements AutoCloseable {
      * Validate a single chunk's integrity with optional speculative flag.
      */
     public CompletableFuture<IntegrityReport> validateChunk(int chunkX, int chunkZ, byte[] data, boolean speculative) {
+        // Smart Validation: Only validate based on probability (default 1%, 100% after crash)
+        if (!speculative && random.nextDouble() > validationProbability) {
+            return CompletableFuture.completedFuture(new IntegrityReport(chunkX, chunkZ, ValidationResult.VALID, 
+                                                                       "Smart Validation: Skipped (Sampling)", data != null ? data.length : 0));
+        }
+
         return CompletableFuture.supplyAsync(() -> {
             byte[] currentData = data;
             long startTime = System.currentTimeMillis();

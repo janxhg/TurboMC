@@ -1,6 +1,7 @@
 package com.turbomc.storage.lrf;
 
 import com.turbomc.storage.optimization.TurboStorageManager;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtIo;
 import net.minecraft.nbt.NbtAccounter;
 import net.minecraft.world.level.ChunkPos;
@@ -168,10 +169,14 @@ public class LRFRegionFileAdapter extends RegionFile {
         TurboStorageManager manager = TurboStorageManager.getInstance();
         
         try {
+            // Read raw NBT
+            CompoundTag tag = NbtIo.read(new DataInputStream(new ByteArrayInputStream(nbtData)), NbtAccounter.unlimitedHeap());
+            
+            // Optimization Phase: Apply NBT data reduction
+            tag = com.turbomc.storage.optimization.NBTOptimizer.optimizeChunkNBT(tag);
+            
             // Marshall to PackedBinary (v2.0 standard)
-            byte[] dataToWrite = com.turbomc.nbt.NBTConverter.toPackedBinary(
-                NbtIo.read(new DataInputStream(new ByteArrayInputStream(nbtData)), NbtAccounter.unlimitedHeap())
-            ).toBytes();
+            byte[] dataToWrite = com.turbomc.nbt.NBTConverter.toPackedBinary(tag).toBytes();
             
             // Hand off to manager (non-blocking if batching is enabled)
             manager.saveChunk(filePath, chunkPos.x, chunkPos.z, dataToWrite);

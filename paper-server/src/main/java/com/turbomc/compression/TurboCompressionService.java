@@ -22,6 +22,7 @@ public class TurboCompressionService {
     private final AtomicLong compressionCount = new AtomicLong(0);
     private final AtomicLong decompressionCount = new AtomicLong(0);
     private final AtomicLong fallbackCount = new AtomicLong(0);
+    private final com.turbomc.util.BufferPool pool = com.turbomc.util.BufferPool.getInstance();
     
     private TurboCompressionService(TurboConfig config) {
         String algorithm = config.getCompressionAlgorithm().toLowerCase();
@@ -77,6 +78,7 @@ public class TurboCompressionService {
         }
         
         try {
+            // Compress using primary
             byte[] compressed = primaryCompressor.compress(data);
             compressionCount.incrementAndGet();
             compressedBytes.addAndGet(compressed.length);

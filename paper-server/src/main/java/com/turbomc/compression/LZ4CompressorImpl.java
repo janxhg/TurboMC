@@ -83,12 +83,10 @@ public class LZ4CompressorImpl implements Compressor {
                 return new byte[0];
             }
             
-            // Decompress
-            byte[] compressedData = new byte[buffer.remaining()];
-            buffer.get(compressedData);
-            
+            // Decompress directly from the input array to avoid copy
+            int compressedOffset = buffer.position();
             byte[] decompressed = new byte[originalSize];
-            decompressor.decompress(compressedData, 0, decompressed, 0, originalSize);
+            decompressor.decompress(compressed, compressedOffset, decompressed, 0, originalSize);
             
             return decompressed;
         } catch (Exception e) {
