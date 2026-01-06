@@ -13,20 +13,27 @@ public class LRFChunkEntry {
     private final int chunkZ;
     private final byte[] data;
     private final long timestamp;
+    private final boolean fromPool;
     
     /**
      * Create a new chunk entry.
      * 
      * @param chunkX Chunk X coordinate
      * @param chunkZ Chunk Z coordinate
-     * @param data Chunk NBT data (already compressed)
-     * @param timestamp Last modification time (Unix timestamp in seconds)
+     * @param data Chunk NBT data
+     * @param timestamp Last modification time
+     * @param fromPool True if data buffer should be returned to BufferPool
      */
-    public LRFChunkEntry(int chunkX, int chunkZ, byte[] data, long timestamp) {
+    public LRFChunkEntry(int chunkX, int chunkZ, byte[] data, long timestamp, boolean fromPool) {
         this.chunkX = chunkX;
         this.chunkZ = chunkZ;
         this.data = data;
         this.timestamp = timestamp;
+        this.fromPool = fromPool;
+    }
+
+    public LRFChunkEntry(int chunkX, int chunkZ, byte[] data, long timestamp) {
+        this(chunkX, chunkZ, data, timestamp, false);
     }
     
     /**
@@ -136,6 +143,25 @@ public class LRFChunkEntry {
         return 0;
     }
     
+    /**
+     * Release resources. Returns buffer to pool if managed.
+     */
+    public void release() {
+        if (fromPool && data != null) {
+            com.turbomc.util.BufferPool.getInstance().release(data);
+        }
+    }
+
+    private volatile com.turbomc.storage.integrity.ChunkIntegrityValidator.ChunkChecksum calculatedChecksum;
+
+    public void setCalculatedChecksum(com.turbomc.storage.integrity.ChunkIntegrityValidator.ChunkChecksum checksum) {
+        this.calculatedChecksum = checksum;
+    }
+
+    public com.turbomc.storage.integrity.ChunkIntegrityValidator.ChunkChecksum getCalculatedChecksum() {
+        return calculatedChecksum;
+    }
+
     @Override
     public String toString() {
         return String.format("LRFChunkEntry{x=%d, z=%d, size=%d bytes, timestamp=%d}",

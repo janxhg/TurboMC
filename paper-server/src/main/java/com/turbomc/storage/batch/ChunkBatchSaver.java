@@ -63,6 +63,7 @@ public class ChunkBatchSaver implements AutoCloseable {
     private final long autoFlushDelayMs;
     private volatile long lastFlushTime;
     private java.util.function.Consumer<List<LRFChunkEntry>> postFlushAction;
+    private com.turbomc.storage.integrity.ChunkIntegrityValidator integrityValidator;
     
     /**
      * Create a new batch saver with default configuration.
@@ -286,6 +287,11 @@ public class ChunkBatchSaver implements AutoCloseable {
                     }
                     
                     for (CompletableFuture<Void> f : currentFutures) f.complete(null);
+                    
+                    // FIXED: Release original chunks only AFTER everything is done
+                    for (LRFChunkEntry chunk : currentBatch) {
+                        chunk.release();
+                    }
                 }
             });
     }
@@ -327,30 +333,57 @@ public class ChunkBatchSaver implements AutoCloseable {
      */
     private CompressedChunk compressChunk(LRFChunkEntry chunk) {
         byte[] data = chunk.getData();
+        com.turbomc.util.BufferPool pool = com.turbomc.util.BufferPool.getInstance();
         
-        // Append timestamp to data
-        ByteBuffer dataWithTimestamp = ByteBuffer.allocate(data.length + 8);
-        dataWithTimestamp.put(data);
-        dataWithTimestamp.putLong(chunk.getTimestamp());
-        dataWithTimestamp.flip();
+        // Borrow buffer for data + timestamp (DATA + 8 bytes)
+        byte[] dataWithTimestamp = pool.acquire(data.length + 8);
         
-        byte[] dataToWrite = new byte[dataWithTimestamp.remaining()];
-        dataWithTimestamp.get(dataToWrite);
-        
-        // Compress if needed
-        byte[] compressedData;
-        if (compressionType == LRFConstants.COMPRESSION_NONE) {
-            compressedData = dataToWrite;
-        } else {
-            try {
-                compressedData = TurboCompressionService.getInstance().compress(dataToWrite);
-            } catch (Exception e) {
-                System.err.println("[TurboMC] Compression failed for chunk: " + e.getMessage());
-                compressedData = dataToWrite; // Fallback to uncompressed
+        try {
+            System.arraycopy(data, 0, dataWithTimestamp, 0, data.length);
+            long ts = chunk.getTimestamp();
+            dataWithTimestamp[data.length]     = (byte) (ts >>> 56);
+            dataWithTimestamp[data.length + 1] = (byte) (ts >>> 48);
+            dataWithTimestamp[data.length + 2] = (byte) (ts >>> 40);
+            dataWithTimestamp[data.length + 3] = (byte) (ts >>> 32);
+            dataWithTimestamp[data.length + 4] = (byte) (ts >>> 24);
+            dataWithTimestamp[data.length + 5] = (byte) (ts >>> 16);
+            dataWithTimestamp[data.length + 6] = (byte) (ts >>> 8);
+            dataWithTimestamp[data.length + 7] = (byte) ts;
+            
+            // FIXED: Do NOT release original buffer yet - needed for checksum validation
+            // chunk.release(); 
+            
+            // Safe Point: Calculate Integrity Checksum here on the stable snapshot
+            // We MUST use dataWithTimestamp (the local copy) because 'data' might be modified by the server concurrently
+            if (integrityValidator != null) {
+                // Create a clean view of the data without timestamp for checksum calculation
+                byte[] dataSnapshot = new byte[data.length];
+                System.arraycopy(dataWithTimestamp, 0, dataSnapshot, 0, data.length);
+                
+                com.turbomc.storage.integrity.ChunkIntegrityValidator.ChunkChecksum checksum = 
+                    integrityValidator.calculateChecksums(chunk.getChunkX(), chunk.getChunkZ(), dataSnapshot);
+                chunk.setCalculatedChecksum(checksum);
             }
+            
+            // Compress
+            byte[] compressedData;
+            if (compressionType == LRFConstants.COMPRESSION_NONE) {
+                compressedData = new byte[data.length + 8];
+                System.arraycopy(dataWithTimestamp, 0, compressedData, 0, compressedData.length);
+            } else {
+                try {
+                    compressedData = TurboCompressionService.getInstance().compress(dataWithTimestamp, 0, data.length + 8);
+                } catch (Exception e) {
+                    System.err.println("[TurboMC] Compression failed for chunk: " + e.getMessage());
+                    compressedData = new byte[data.length + 8];
+                    System.arraycopy(dataWithTimestamp, 0, compressedData, 0, compressedData.length);
+                }
+            }
+            
+            return new CompressedChunk(chunk, compressedData);
+        } finally {
+            pool.release(dataWithTimestamp);
         }
-        
-        return new CompressedChunk(chunk, compressedData);
     }
     
     /**
@@ -364,10 +397,13 @@ public class ChunkBatchSaver implements AutoCloseable {
                     regionWriter = new LRFRegionWriter(sharedResource, compressionType);
                 }
                 
-                // Write chunks sequentially - already synchronized in LRFRegionWriter, 
-                // but we stay synchronized here to ensure flush() follows immediately
+                // Write chunks using pre-compressed data to avoid double compression
                 for (CompressedChunk compressedChunk : compressedChunks) {
-                    regionWriter.addChunk(compressedChunk.originalChunk);
+                    regionWriter.addCompressedChunk(
+                        compressedChunk.originalChunk.getChunkX(), 
+                        compressedChunk.originalChunk.getChunkZ(), 
+                        compressedChunk.compressedData
+                    );
                 }
                 
                 // Smart flushing: Only force fsync if 2 seconds passed OR batch is large
@@ -432,6 +468,10 @@ public class ChunkBatchSaver implements AutoCloseable {
 
     public void setPostFlushAction(java.util.function.Consumer<List<LRFChunkEntry>> action) {
         this.postFlushAction = action;
+    }
+
+    public void setIntegrityValidator(com.turbomc.storage.integrity.ChunkIntegrityValidator validator) {
+        this.integrityValidator = validator;
     }
 
     /**

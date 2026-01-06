@@ -12,7 +12,7 @@ import com.turbomc.performance.entity.TurboRedstoneOptimizer;
 import com.turbomc.performance.entity.TurboHopperOptimizer;
 import com.turbomc.performance.entity.TurboMobSpawningOptimizer;
 import com.turbomc.performance.chunk.TurboChunkTickingOptimizer;
-import com.turbomc.performance.render.TurboParticleOptimizer;
+// import com.turbomc.performance.render.TurboParticleOptimizer;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
 
@@ -215,8 +215,8 @@ public final class TurboLRFBootstrap {
             
             // Initialize Particle Optimizer
             System.out.println("[TurboMC][Perf] Initializing Particle Optimizer...");
-            TurboParticleOptimizer particleOptimizer = TurboParticleOptimizer.getInstance();
-            particleOptimizer.initialize();
+            // TurboParticleOptimizer particleOptimizer = TurboParticleOptimizer.getInstance();
+            // particleOptimizer.initialize();
             
             // Initialize Chunk Loading Optimizer
             System.out.println("[TurboMC][Perf] Initializing Chunk Loading Optimizer...");

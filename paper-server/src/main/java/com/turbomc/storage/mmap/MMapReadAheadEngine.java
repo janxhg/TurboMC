@@ -26,6 +26,7 @@ import java.util.Set;
 import java.util.HashSet;
 import java.util.Collections;
 import com.turbomc.storage.optimization.SharedRegionResource;
+import com.turbomc.storage.optimization.CompressedChunkPacket;
 import com.turbomc.compression.TurboCompressionService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -247,14 +248,14 @@ public class MMapReadAheadEngine implements AutoCloseable {
     }
 
     /**
-     * Read a chunk with automatic caching and prefetching.
+     * Read a chunk and return its compressed packet (Pipeline API).
      * 
      * @param chunkX Chunk X coordinate
      * @param chunkZ Chunk Z coordinate
-     * @return Chunk data, or null if chunk doesn't exist
+     * @return Compressed chunk packet, or null if chunk doesn't exist
      * @throws IOException if read fails
      */
-    public byte[] readChunk(int chunkX, int chunkZ) throws IOException {
+    public CompressedChunkPacket readChunkPacket(int chunkX, int chunkZ) throws IOException {
         if (isClosed.get()) {
             throw new IllegalStateException("MMapReadAheadEngine is closed");
         }
@@ -277,10 +278,9 @@ public class MMapReadAheadEngine implements AutoCloseable {
             flushBarrier.beforeRead();
             try {
                 // PROACTIVE: Trigger prefetch on hits too! 
-                // This ensures we keep moving ahead of the player even if they hit cached chunks.
                 triggerPrefetch(chunkX, chunkZ);
                 
-                return cached.getData();
+                return new CompressedChunkPacket(chunkX, chunkZ, cached.getData(), cached.getLength(), cached.getCompressionType());
             } finally {
                 flushBarrier.afterRead(null);
             }
@@ -291,28 +291,75 @@ public class MMapReadAheadEngine implements AutoCloseable {
         
         flushBarrier.beforeRead();
         try {
-            // Read chunk from file
-            byte[] data = readChunkDirect(chunkX, chunkZ);
-            if (data == null) {
+             // Read chunk from file (returns packet)
+            CompressedChunkPacket packet = readChunkDirect(chunkX, chunkZ);
+            if (packet == null) {
                 return null;
             }
             
             // Cache the chunk
-            cacheChunk(chunkIndex, data);
+            cacheChunk(chunkIndex, packet.data, packet.length, packet.compressionType, false);
             
             // Trigger prefetch for nearby chunks
             triggerPrefetch(chunkX, chunkZ);
             
-            return data;
+            return packet;
         } finally {
             flushBarrier.afterRead(mappedBuffer);
         }
     }
+
+    /**
+     * Legacy read chunk (Synchronous Decompression).
+     * @deprecated Use readChunkPacket for high performance pipeline.
+     */
+    @Deprecated
+    public byte[] readChunk(int chunkX, int chunkZ) throws IOException {
+        CompressedChunkPacket packet = readChunkPacket(chunkX, chunkZ);
+        if (packet == null) return null;
+        
+        // Decompress inline (Legacy behavior)
+        return decompress(packet.data, packet.length, packet.compressionType);
+    }
+
+    private byte[] decompress(byte[] compressed, int length, int type) throws IOException {
+        byte[] fullData;
+        
+        if (type == LRFConstants.COMPRESSION_NONE) {
+            // Return copy if not compressed (to match legacy behavior of fresh array)
+            fullData = new byte[length];
+            System.arraycopy(compressed, 0, fullData, 0, length);
+        } else {
+            try {
+                // Use TurboCompressionService with specific length
+                // We need to slice the array if it's from a pool (likely oversized)
+                if (compressed.length != length) {
+                     fullData = com.turbomc.compression.TurboCompressionService.getInstance().decompress(java.util.Arrays.copyOf(compressed, length));
+                } else {
+                     fullData = com.turbomc.compression.TurboCompressionService.getInstance().decompress(compressed);
+                }
+            } catch (Exception e) {
+                throw new IOException("Failed to decompress chunk data", e);
+            }
+        }
+        
+        // FIXED: LRF chunks have an 8-byte timestamp trailer that MUST be stripped
+        // otherwise it corrupts NBT reading and Checksum validation (MMap Pipeline Fix)
+        if (fullData.length < 8) {
+             throw new IOException("Chunk data too short (no timestamp trailer)");
+        }
+        
+        int actualSize = fullData.length - 8;
+        byte[] nbtData = new byte[actualSize];
+        System.arraycopy(fullData, 0, nbtData, 0, actualSize);
+        
+        return nbtData;
+    }
     
     /**
-     * Read chunk directly from memory-mapped file.
+     * Read chunk directly from memory-mapped file (No Decompression).
      */
-    private byte[] readChunkDirect(int chunkX, int chunkZ) throws IOException {
+    private CompressedChunkPacket readChunkDirect(int chunkX, int chunkZ) throws IOException {
         try {
             // Read LRF header to get chunk offset
             LRFHeader header = readHeader();
@@ -332,34 +379,30 @@ public class MMapReadAheadEngine implements AutoCloseable {
             byte[] data = pool.acquire(size);
             
             try {
+                // ... (Reading logic remains same) ...
                 if (mappedBuffer != null && offset + size <= mappedBuffer.limit()) {
                     try {
-                        // Optimized concurrent access
                         mappedBuffer.get(offset, data);
                     } catch (Exception e) {
-                        // Fallback to standard I/O if mmap access fails (rare race)
                         ByteBuffer buffer = ByteBuffer.wrap(data);
                         fileChannel.read(buffer, offset);
                     }
                 } else {
-                    // Fallback to standard I/O if not mapped or beyond mapping limit (file growth)
+                     // Fallback read
                     int bytesRead = 0;
                     int retries = 0;
                     while (bytesRead < size && retries < 3) {
                         ByteBuffer buffer = ByteBuffer.wrap(data, bytesRead, size - bytesRead);
                         int read = fileChannel.read(buffer, offset + bytesRead);
                         if (read <= 0) {
-                            if (retries < 2) {
-                                try { Thread.sleep(5); } catch (InterruptedException ignored) {}
-                            }
+                            if (retries < 2) try { Thread.sleep(5); } catch (InterruptedException ignored) {}
                             retries++;
                             continue;
                         }
                         bytesRead += read;
                     }
-                    
-                    if (bytesRead < size) {
-                        return null; // Avoid processing partial data
+                     if (bytesRead < size) {
+                        return null; 
                     }
                 }
                 
@@ -383,21 +426,13 @@ public class MMapReadAheadEngine implements AutoCloseable {
                 }
                 
                 byte[] payload = pool.acquire(payloadSize);
-                try {
-                    System.arraycopy(data, 5, payload, 0, payloadSize);
-                    
-                    // Decompress if needed
-                    if (localType != LRFConstants.COMPRESSION_NONE) {
-                        return TurboCompressionService.getInstance().decompress(payload);
-                    }
-                    
-                    // If no compression, we must return a fresh copy because payload belongs to pool
-                    byte[] copy = new byte[payloadSize];
-                    System.arraycopy(payload, 0, copy, 0, payloadSize);
-                    return copy;
-                } finally {
-                    pool.release(payload);
-                }
+                
+                // Copy raw compressed data to payload
+                System.arraycopy(data, 5, payload, 0, payloadSize);
+                
+                // Return packet WITHOUT decompressing
+                return new CompressedChunkPacket(chunkX, chunkZ, payload, payloadSize, localType);
+                
             } finally {
                 pool.release(data);
             }
@@ -468,21 +503,21 @@ public class MMapReadAheadEngine implements AutoCloseable {
     /**
      * Cache a chunk with memory management.
      */
-    private void cacheChunk(int chunkIndex, byte[] data) {
-        cacheChunk(chunkIndex, data, false);
+    private void cacheChunk(int chunkIndex, byte[] data, int length, int compressionType) {
+        cacheChunk(chunkIndex, data, length, compressionType, false);
     }
     
     /**
      * Cache a chunk with memory management.
      */
-    private void cacheChunk(int chunkIndex, byte[] data, boolean prefetched) {
+    private void cacheChunk(int chunkIndex, byte[] data, int length, int compressionType, boolean prefetched) {
         // Check memory limits
-        if (currentMemoryUsage.get() + data.length > maxMemoryUsage) {
+        if (currentMemoryUsage.get() + length > maxMemoryUsage) {
             cleanupCache();
         }
         
         // If still over limit, don't cache
-        if (currentMemoryUsage.get() + data.length > maxMemoryUsage) {
+        if (currentMemoryUsage.get() + length > maxMemoryUsage) {
             return;
         }
         
@@ -491,9 +526,9 @@ public class MMapReadAheadEngine implements AutoCloseable {
             evictLRU();
         }
         
-        CachedChunk cached = new CachedChunk(data, System.currentTimeMillis(), prefetched);
+        CachedChunk cached = new CachedChunk(data, length, compressionType, System.currentTimeMillis(), prefetched);
         if (chunkCache.put(chunkIndex, cached) == null) {
-            currentMemoryUsage.addAndGet(data.length);
+            currentMemoryUsage.addAndGet(length);
         }
         lruOrder.remove(chunkIndex);
         lruOrder.addLast(chunkIndex);
@@ -630,15 +665,15 @@ public class MMapReadAheadEngine implements AutoCloseable {
                             // Virtual prefetch (LOD 0/3/4) - Just warm the mapping
                             warmChunk(targetX, targetZ);
                         } else {
-                            byte[] data = readChunkDirect(targetX, targetZ);
-                            if (data != null) {
+                            CompressedChunkPacket packet = readChunkDirect(targetX, targetZ);
+                            if (packet != null) {
                                 // Speculative validation before caching (v2.4.1)
                                 com.turbomc.storage.optimization.TurboStorageManager.getInstance()
-                                    .validateSpeculative(regionPath, targetX, targetZ, data)
+                                    .validateSpeculative(regionPath, targetX, targetZ, packet.data)
                                     .thenAccept(report -> {
                                         if (report.isValid()) {
                                             int chunkIndex = LRFConstants.getChunkIndex(targetX & 31, targetZ & 31);
-                                            cacheChunk(chunkIndex, data, true);
+                                            cacheChunk(chunkIndex, packet.data, packet.length, packet.compressionType, true);
                                         }
                                     });
                             }
@@ -758,7 +793,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
         
         chunkCache.values().removeIf(chunk -> {
             if (chunk.isExpired(currentTime)) {
-                currentMemoryUsage.addAndGet(-chunk.getData().length);
+                currentMemoryUsage.addAndGet(-chunk.getLength());
                 return true;
             }
             return false;
@@ -778,7 +813,7 @@ public class MMapReadAheadEngine implements AutoCloseable {
         if (oldestIndex != null) {
             CachedChunk removed = chunkCache.remove(oldestIndex);
             if (removed != null) {
-                currentMemoryUsage.addAndGet(-removed.getData().length);
+                currentMemoryUsage.addAndGet(-removed.getLength());
             }
         }
     }
@@ -921,14 +956,28 @@ public class MMapReadAheadEngine implements AutoCloseable {
     /**
      * Cached chunk entry with expiration.
      */
+    /**
+     * Cached chunk entry with expiration.
+     */
     private static class CachedChunk {
         private final byte[] data;
+        private final int length; // Added length field
+        private final int compressionType;
         private final long createTime;
         private final boolean prefetched;
         private volatile long lastAccess;
         
-        CachedChunk(byte[] data, long createTime, boolean prefetched) {
-            this.data = data;
+        CachedChunk(byte[] data, int length, int compressionType, long createTime, boolean prefetched) {
+            // For cache, we should ideally trim the array to save memory
+            // modifying 'data' in place or storing 'length'
+            if (data.length != length) {
+                 this.data = new byte[length];
+                 System.arraycopy(data, 0, this.data, 0, length);
+            } else {
+                 this.data = data;
+            }
+            this.length = length; // Store the actual length
+            this.compressionType = compressionType;
             this.createTime = createTime;
             this.prefetched = prefetched;
             this.lastAccess = createTime;
@@ -948,6 +997,8 @@ public class MMapReadAheadEngine implements AutoCloseable {
         
         boolean isPrefetched() { return prefetched; }
         byte[] getData() { return data; }
+        int getLength() { return length; }
+        int getCompressionType() { return compressionType; }
         long getCreateTime() { return createTime; }
         long getLastAccess() { return lastAccess; }
     }

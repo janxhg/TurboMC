@@ -60,10 +60,10 @@ public class TurboMCPlugin extends JavaPlugin {
     
     private void initializeCompressionService() {
         try {
-            // this.compressionService = new TurboCompressionService(turboConfig); // TODO: Implement when available
-            LOGGER.info("Turbo Compression Service initialized (mock)");
+            this.compressionService = TurboCompressionService.getInstance();
+            LOGGER.info("Turbo Compression Service linked successfully");
         } catch (Exception e) {
-            LOGGER.severe("Failed to initialize Compression Service: " + e.getMessage());
+            LOGGER.severe("Failed to link Compression Service: " + e.getMessage());
             throw e;
         }
     }
@@ -91,9 +91,9 @@ public class TurboMCPlugin extends JavaPlugin {
         return turboConfig;
     }
     
-    // Mock storage manager for now
-    public Object getStorageManager() {
-        return null; // TODO: Implement when storage manager is available
+    // Link to the internal storage manager
+    public com.turbomc.storage.optimization.TurboStorageManager getStorageManager() {
+        return com.turbomc.storage.optimization.TurboStorageManager.getInstance();
     }
     
     // Configuration methods

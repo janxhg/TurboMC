@@ -34,7 +34,12 @@ public class ZlibCompressor implements Compressor {
     
     @Override
     public byte[] compress(byte[] data) throws CompressionException {
-        if (data == null || data.length == 0) {
+        return compress(data, 0, data != null ? data.length : 0);
+    }
+
+    @Override
+    public byte[] compress(byte[] data, int offset, int length) throws CompressionException {
+        if (data == null || length == 0) {
             return new byte[]{MAGIC_BYTE, 0, 0, 0, 0};
         }
         
@@ -42,14 +47,10 @@ public class ZlibCompressor implements Compressor {
             Deflater deflater = deflaterCache.get();
             deflater.reset();
             deflater.setLevel(level);
-            deflater.setInput(data);
+            deflater.setInput(data, offset, length);
             deflater.finish();
             
-            // Reusable buffer for output
-            // We still need to return a correctly sized array, so standard BAOS is safest 
-            // but we can optimize the writing buffer.
-            
-            java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream(data.length / 2); // Initial estimate
+            java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream(length / 2);
             byte[] buffer = bufferCache.get();
             
             while (!deflater.finished()) {
@@ -57,14 +58,11 @@ public class ZlibCompressor implements Compressor {
                 outputStream.write(buffer, 0, count);
             }
             
-            // Deflater is not closed, just reset next time
-            
             byte[] compressed = outputStream.toByteArray();
             
-            // Format: [magic byte (1)] [original size (4)] [compressed data]
             ByteBuffer result = ByteBuffer.allocate(1 + 4 + compressed.length);
             result.put(MAGIC_BYTE);
-            result.putInt(data.length);
+            result.putInt(length);
             result.put(compressed);
             
             return result.array();

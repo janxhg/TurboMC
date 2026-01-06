@@ -19,6 +19,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import com.turbomc.storage.optimization.CompressedChunkPacket;
 import java.util.logging.Logger;
 
 /**
@@ -100,85 +101,84 @@ public class TurboStorageManager implements AutoCloseable {
         this.isClosed = new AtomicBoolean(false);
         
         // Initialize global executors if batching is enabled
-        if (config.getBoolean("storage.batch.enabled", true)) {
-            // Set LRF verbosity
-            LRFRegionWriter.setVerbose(config.getBoolean("storage.lrf.verbose", false));
-            
-            int processors = Runtime.getRuntime().availableProcessors();
-            
-            // Memory-aware thread sizing using Fase 5 hardware profiler
-            MemoryMonitor memoryMonitor = new MemoryMonitor();
-            double memoryPressure = memoryMonitor.getMemoryPressure();
-            
-            // Get optimal thread counts from hardware profiler
-            int baseLoadThreads = hardwareProfiler.getOptimalThreadCount(0.5);
-            int baseWriteThreads = hardwareProfiler.getOptimalThreadCount(0.25);
-            int baseCompressionThreads = hardwareProfiler.getOptimalThreadCount(0.3);
-            int baseDecompressionThreads = hardwareProfiler.getOptimalThreadCount(0.4);
-            
-            // Apply dynamic configuration adjustments
-            TurboDynamicConfig.AdjustmentMode mode = dynamicConfig.getCurrentMode();
-            double multiplier = mode.multiplier;
-            
-            final int MAX_LOAD_THREADS = 32; // Increased to support generation
-            final int MAX_WRITE_THREADS = 8;
-            final int MAX_COMPRESSION_THREADS = 16;
-            final int MAX_DECOMPRESSION_THREADS = 32;
-            
-            int loadThreads = Math.max(4, Math.min(baseLoadThreads, MAX_LOAD_THREADS * 2));
-            int writeThreads = Math.max(2, Math.min(baseWriteThreads, MAX_WRITE_THREADS * 2));
-            int compressionThreads = Math.max(2, Math.min(baseCompressionThreads, MAX_COMPRESSION_THREADS * 2));
-            int decompressionThreads = Math.max(4, Math.min(baseDecompressionThreads, MAX_DECOMPRESSION_THREADS * 2));
-            
-            // Apply memory pressure reduction
-            if (memoryPressure > 0.8) {
-                loadThreads = Math.max(2, loadThreads / 2);
-                writeThreads = Math.max(1, writeThreads / 2);
-                compressionThreads = Math.max(1, compressionThreads / 2);
-                decompressionThreads = Math.max(2, decompressionThreads / 2);
-            }
-            
-            System.out.println("[TurboMC][TurboStorageManager] Dynamic thread sizing: " +
-                             "load=" + loadThreads + ", write=" + writeThreads + 
-                             ", compression=" + compressionThreads + ", decompression=" + decompressionThreads +
-                             " (mode: " + mode.name + ", memory pressure: " + String.format("%.2f", memoryPressure) + ")");
-            
-            // Create daemon threads to allow JVM shutdown
-            this.globalLoadExecutor = java.util.concurrent.Executors.newFixedThreadPool(loadThreads, r -> {
-                Thread t = new Thread(r, "Turbo-Global-LoadPool");
-                t.setDaemon(true);  // CRITICAL: Allow JVM to shutdown
-                return t;
-            });
-            
-            this.globalWriteExecutor = java.util.concurrent.Executors.newFixedThreadPool(writeThreads, r -> {
-                Thread t = new Thread(r, "Turbo-Global-WritePool");
-                t.setDaemon(true);
-                return t;
-            });
-            
-            this.globalCompressionExecutor = java.util.concurrent.Executors.newFixedThreadPool(compressionThreads, r -> {
-                Thread t = new Thread(r, "Turbo-Global-CompressionPool");
-                t.setDaemon(true);
-                return t;
-            });
-            
-            this.globalDecompressionExecutor = java.util.concurrent.Executors.newFixedThreadPool(decompressionThreads, r -> {
-                Thread t = new Thread(r, "Turbo-Global-DecompressionPool");
-                t.setDaemon(true);
-                return t;
-            });
-            
-            // Dedicated prefetch pool - lower priority
-            this.globalPrefetchExecutor = java.util.concurrent.Executors.newFixedThreadPool(Math.max(2, loadThreads), r -> {
-                Thread t = new Thread(r, "Turbo-Global-PrefetchPool");
-                t.setDaemon(true);
-                t.setPriority(Thread.MIN_PRIORITY); // Background priority
-                return t;
-            });
-                
-            System.out.println("[TurboMC][Storage] Global thread pools initialized (" + 
-                loadThreads + "L, " + writeThreads + "W, " + compressionThreads + "C, " + decompressionThreads + "D, " + Math.max(2, loadThreads) + "P)");
+        // Initialize global executors unconditionally to support fallback paths
+        // Set LRF verbosity
+        LRFRegionWriter.setVerbose(config.getBoolean("storage.lrf.verbose", false));
+        
+        int processors = Runtime.getRuntime().availableProcessors();
+        
+        // Memory-aware thread sizing using Fase 5 hardware profiler
+        MemoryMonitor memoryMonitor = new MemoryMonitor();
+        double memoryPressure = memoryMonitor.getMemoryPressure();
+        
+        // Get optimal thread counts from hardware profiler
+        int baseLoadThreads = hardwareProfiler.getOptimalThreadCount(0.5);
+        int baseWriteThreads = hardwareProfiler.getOptimalThreadCount(0.25);
+        int baseCompressionThreads = hardwareProfiler.getOptimalThreadCount(0.3);
+        int baseDecompressionThreads = hardwareProfiler.getOptimalThreadCount(0.4);
+        
+        // Apply dynamic configuration adjustments
+        TurboDynamicConfig.AdjustmentMode mode = dynamicConfig.getCurrentMode();
+        double multiplier = mode.multiplier;
+        
+        final int MAX_LOAD_THREADS = 32; // Increased to support generation
+        final int MAX_WRITE_THREADS = 8;
+        final int MAX_COMPRESSION_THREADS = 16;
+        final int MAX_DECOMPRESSION_THREADS = 32;
+        
+        int loadThreads = Math.max(4, Math.min(baseLoadThreads, MAX_LOAD_THREADS * 2));
+        int writeThreads = Math.max(2, Math.min(baseWriteThreads, MAX_WRITE_THREADS * 2));
+        int compressionThreads = Math.max(2, Math.min(baseCompressionThreads, MAX_COMPRESSION_THREADS * 2));
+        int decompressionThreads = Math.max(4, Math.min(baseDecompressionThreads, MAX_DECOMPRESSION_THREADS * 2));
+        
+        // Apply memory pressure reduction
+        if (memoryPressure > 0.8) {
+            loadThreads = Math.max(2, loadThreads / 2);
+            writeThreads = Math.max(1, writeThreads / 2);
+            compressionThreads = Math.max(1, compressionThreads / 2);
+            decompressionThreads = Math.max(2, decompressionThreads / 2);
         }
+        
+        System.out.println("[TurboMC][TurboStorageManager] Dynamic thread sizing: " +
+                            "load=" + loadThreads + ", write=" + writeThreads + 
+                            ", compression=" + compressionThreads + ", decompression=" + decompressionThreads +
+                            " (mode: " + mode.name + ", memory pressure: " + String.format("%.2f", memoryPressure) + ")");
+        
+        // Create daemon threads to allow JVM shutdown
+        this.globalLoadExecutor = java.util.concurrent.Executors.newFixedThreadPool(loadThreads, r -> {
+            Thread t = new Thread(r, "Turbo-Global-LoadPool");
+            t.setDaemon(true);  // CRITICAL: Allow JVM to shutdown
+            return t;
+        });
+        
+        this.globalWriteExecutor = java.util.concurrent.Executors.newFixedThreadPool(writeThreads, r -> {
+            Thread t = new Thread(r, "Turbo-Global-WritePool");
+            t.setDaemon(true);
+            return t;
+        });
+        
+        this.globalCompressionExecutor = java.util.concurrent.Executors.newFixedThreadPool(compressionThreads, r -> {
+            Thread t = new Thread(r, "Turbo-Global-CompressionPool");
+            t.setDaemon(true);
+            return t;
+        });
+        
+        this.globalDecompressionExecutor = java.util.concurrent.Executors.newFixedThreadPool(decompressionThreads, r -> {
+            Thread t = new Thread(r, "Turbo-Global-DecompressionPool");
+            t.setDaemon(true);
+            return t;
+        });
+        
+        // Dedicated prefetch pool - lower priority
+        this.globalPrefetchExecutor = java.util.concurrent.Executors.newFixedThreadPool(Math.max(2, loadThreads), r -> {
+            Thread t = new Thread(r, "Turbo-Global-PrefetchPool");
+            t.setDaemon(true);
+            t.setPriority(Thread.MIN_PRIORITY); // Background priority
+            return t;
+        });
+            
+        System.out.println("[TurboMC][Storage] Global thread pools initialized (" + 
+            loadThreads + "L, " + writeThreads + "W, " + compressionThreads + "C, " + decompressionThreads + "D, " + Math.max(2, loadThreads) + "P)");
         
         // Load feature flags from configuration
         this.batchEnabled = config.getBoolean("storage.batch.enabled", true);
@@ -347,33 +347,59 @@ public class TurboStorageManager implements AutoCloseable {
         
         final Path finalPath = normalizePath(regionPath);
         
-        // Try memory-mapped read-ahead first (fastest)
+        // Try memory-mapped read-ahead first (fastest) - Optimized Pipeline (v3.0)
         if (mmapEnabled) {
             MMapReadAheadEngine mmapEngine = getReadAheadEngine(finalPath);
             if (mmapEngine != null) {
                 try {
-                    byte[] data = mmapEngine.readChunk(chunkX, chunkZ);
-                    if (data != null) {
-                        LRFChunkEntry chunk = new LRFChunkEntry(chunkX, chunkZ, data);
-                        
-                        // Validate integrity if enabled and requested
-                        if (integrityEnabled && validate) {
-                            return validateChunk(finalPath, chunkX, chunkZ, data, false)
-                                .thenCompose(report -> {
-                                    if (report.isCorrupted()) {
-                                        System.err.println("[TurboMC][Storage] Chunk corruption detected in MMap: " + 
-                                                         report.getMessage() + ". Discarding and falling back...");
-                                        // Return null to trigger fallbacks down the line
-                                        return CompletableFuture.completedFuture(null);
+                    // Stage 1: Fetch Compressed Packet (I/O Bound)
+                    // This is fast and non-blocking for mapped memory
+                    CompressedChunkPacket packet = mmapEngine.readChunkPacket(chunkX, chunkZ);
+                    
+                    if (packet != null) {
+                        // Stage 2: Decompress & Inflate (CPU Bound)
+                        // Offload to dedicated decompression threads to avoid blocking I/O or server threads
+                        return CompletableFuture.supplyAsync(() -> {
+                            try {
+                                byte[] decompressed;
+                                if (packet.compressionType != LRFConstants.COMPRESSION_NONE) {
+                                    // Slice the data if necessary (packet.data might be a pooled array which is larger)
+                                    byte[] input = packet.data;
+                                    if (input.length != packet.length) {
+                                         input = java.util.Arrays.copyOf(packet.data, packet.length);
                                     }
-                                    return CompletableFuture.completedFuture(chunk);
-                                });
-                        }
-                        
-                        return CompletableFuture.completedFuture(chunk);
+                                    decompressed = com.turbomc.compression.TurboCompressionService.getInstance().decompress(input);
+                                } else {
+                                    // Make a distinct copy if we plan to mutate or needed by contract
+                                    decompressed = new byte[packet.length];
+                                    System.arraycopy(packet.data, 0, decompressed, 0, packet.length);
+                                }
+                                return new LRFChunkEntry(chunkX, chunkZ, decompressed);
+                            } catch (Exception e) {
+                                System.err.println("[TurboMC][Storage] Async decompression failed for " + chunkX + "," + chunkZ + ": " + e.getMessage());
+                                return null;
+                            }
+                        }, globalDecompressionExecutor)
+                        .thenCompose(chunk -> {
+                            if (chunk == null) return CompletableFuture.completedFuture(null);
+                            
+                            // Stage 3: Validation (if enabled)
+                            if (integrityEnabled && validate) {
+                                return validateChunk(finalPath, chunkX, chunkZ, chunk.getData(), false)
+                                    .thenApply(report -> {
+                                        if (report.isCorrupted()) {
+                                            System.err.println("[TurboMC][Storage] Chunk corruption using MMap Pipeline: " + 
+                                                             report.getMessage());
+                                            return null;
+                                        }
+                                        return chunk;
+                                    });
+                            }
+                            return CompletableFuture.completedFuture(chunk);
+                        });
                     }
                 } catch (IOException e) {
-                    System.err.println("[TurboMC][Storage] MMap read failed, falling back to batch loader: " + e.getMessage());
+                    System.err.println("[TurboMC][Storage] MMap packet read failed, falling back to batch loader: " + e.getMessage());
                 }
             }
         }
@@ -450,11 +476,24 @@ public class TurboStorageManager implements AutoCloseable {
         
         final Path finalPath = normalizePath(regionPath);
         
-        // Defensively copy the data to avoid issues with Paper reusing NBT buffers
-        byte[] dataCopy = new byte[data.length];
+        // Use BufferPool for high-efficacy defensive copy
+        byte[] dataCopy = com.turbomc.util.BufferPool.getInstance().acquire(data.length);
         System.arraycopy(data, 0, dataCopy, 0, data.length);
         
-        LRFChunkEntry chunk = new LRFChunkEntry(chunkX, chunkZ, dataCopy);
+        return saveChunkDirect(finalPath, chunkX, chunkZ, dataCopy, true);
+    }
+
+    /**
+     * Save a chunk using data that is already owned or managed by a pool.
+     * Bypasses the defensive copy to eliminate memory overhead.
+     */
+    public CompletableFuture<Void> saveChunkDirect(Path regionPath, int chunkX, int chunkZ, byte[] data, boolean managedByPool) {
+        if (isClosed.get()) {
+            throw new IllegalStateException("Storage manager is closed");
+        }
+        
+        final Path finalPath = normalizePath(regionPath);
+        LRFChunkEntry chunk = new LRFChunkEntry(chunkX, chunkZ, data, System.currentTimeMillis() / 1000L, managedByPool);
         return saveChunkInternal(finalPath, chunk);
     }
     
@@ -625,7 +664,14 @@ public class TurboStorageManager implements AutoCloseable {
                         ChunkIntegrityValidator validator = getIntegrityValidator(path);
                         if (validator != null) {
                             for (LRFChunkEntry chunk : chunks) {
-                                validator.updateChecksum(chunk.getChunkX(), chunk.getChunkZ(), chunk.getData());
+                                // FIXED: Use pre-calculated checksum if available to avoid race conditions
+                                com.turbomc.storage.integrity.ChunkIntegrityValidator.ChunkChecksum checksum = chunk.getCalculatedChecksum();
+                                if (checksum != null) {
+                                    validator.updateChecksum(checksum);
+                                } else {
+                                    // Fallback (unsafe but better than nothing)
+                                    validator.updateChecksum(chunk.getChunkX(), chunk.getChunkZ(), chunk.getData());
+                                }
                             }
                         }
                     }
@@ -633,6 +679,11 @@ public class TurboStorageManager implements AutoCloseable {
                     // Invalidate header cache ONCE per batch flush
                     resource.invalidateHeader();
                 });
+                
+                // Pass validator to saver for pre-calculation during compression
+                if (integrityEnabled) {
+                    saver.setIntegrityValidator(getIntegrityValidator(path));
+                }
                 
                 return saver;
             } catch (IOException e) {
@@ -1022,6 +1073,7 @@ public class TurboStorageManager implements AutoCloseable {
             .mapToLong(engine -> engine.getCacheMisses())
             .sum();
     }
+
 
     /**
      * Comprehensive statistics for the storage manager.

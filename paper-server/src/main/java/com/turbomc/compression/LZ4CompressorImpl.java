@@ -33,24 +33,29 @@ public class LZ4CompressorImpl implements Compressor {
     
     @Override
     public byte[] compress(byte[] data) throws CompressionException {
-        if (data == null || data.length == 0) {
+        return compress(data, 0, data != null ? data.length : 0);
+    }
+
+    @Override
+    public byte[] compress(byte[] data, int offset, int length) throws CompressionException {
+        if (data == null || length == 0) {
             return new byte[]{MAGIC_BYTE, 0, 0, 0, 0};
         }
         
         com.turbomc.util.BufferPool pool = com.turbomc.util.BufferPool.getInstance();
-        int maxCompressedLength = compressor.maxCompressedLength(data.length);
+        int maxCompressedLength = compressor.maxCompressedLength(length);
         byte[] compressed = pool.acquire(maxCompressedLength);
         
         try {
-            int compressedLength = compressor.compress(data, 0, data.length, compressed, 0, maxCompressedLength);
+            int compressedLength = compressor.compress(data, offset, length, compressed, 0, maxCompressedLength);
             
             // Format: [magic byte (1)] [original size (4)] [compressed data]
             byte[] result = new byte[1 + 4 + compressedLength];
             result[0] = MAGIC_BYTE;
-            result[1] = (byte) (data.length >>> 24);
-            result[2] = (byte) (data.length >>> 16);
-            result[3] = (byte) (data.length >>> 8);
-            result[4] = (byte) data.length;
+            result[1] = (byte) (length >>> 24);
+            result[2] = (byte) (length >>> 16);
+            result[3] = (byte) (length >>> 8);
+            result[4] = (byte) length;
             System.arraycopy(compressed, 0, result, 5, compressedLength);
             
             return result;

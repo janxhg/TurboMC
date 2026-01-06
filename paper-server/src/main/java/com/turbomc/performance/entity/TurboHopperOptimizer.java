@@ -351,21 +351,15 @@ public class TurboHopperOptimizer implements TurboOptimizerModule {
             return false;
         }
         
-        // 3. Proximity Bias: Hoppers far from players are throttled more aggressively
-        boolean nearPlayer = false;
-        for (Player player : level.players()) {
-            if (player.blockPosition().distSqr(pos) < 1024) { // 32 blocks
-                nearPlayer = true;
-                break;
-            }
-        }
+        // 3. Proximity Bias: REMOVED due to O(H*P) overhead.
+        // Rely on global rate limiting and activation optimization instead.
         
-        if (!nearPlayer && health.isUnderPressure()) {
-            // Half the chance to tick if far from players and server is struggling
-            if (System.nanoTime() % 2 == 0) {
-                skippedTicks.incrementAndGet();
-                return false;
-            }
+        // If really struggling, apply uniform probabilistic skipping
+        if (health.isOverloaded()) {
+             if (java.util.concurrent.ThreadLocalRandom.current().nextBoolean()) {
+                 skippedTicks.incrementAndGet();
+                 return false;
+             }
         }
         
         return true;

@@ -65,7 +65,7 @@ public class LRFRegionFileAdapter extends RegionFile {
         TurboStorageManager manager = TurboStorageManager.getInstance();
         try {
             CompletableFuture<LRFChunkEntry> future = manager.loadChunk(filePath, chunkX, chunkZ);
-            LRFChunkEntry chunk = future.get(10, java.util.concurrent.TimeUnit.SECONDS); // Increased timeout
+            LRFChunkEntry chunk = future.get(30, java.util.concurrent.TimeUnit.SECONDS); // Increased timeout to 30s for load spikes
             
             if (chunk == null || chunk.getData().length == 0) {
                 return null;
@@ -158,11 +158,33 @@ public class LRFRegionFileAdapter extends RegionFile {
         } catch (Exception e) {
              throw new IOException("Failed to decompress chunk data (Type: " + type + ") for transcoding to LRF", e);
         }
-
-        // 4. Write to LRF (Re-compresses)
+        
+        // 4. Write to LRF
         writeChunk(chunkPos, nbtData);
     }
-    
+
+    /**
+     * Optimized write path that processes CompoundTag directly.
+     * Bypasses intermediate byte stream serialization to reduce overhead.
+     */
+    public void writeOptimized(ChunkPos chunkPos, CompoundTag nbt) throws IOException {
+        try {
+            // 1. Optimize NBT
+            CompoundTag optimizedTag = com.turbomc.storage.optimization.NBTOptimizer.optimizeChunkNBT(nbt);
+            
+            // 2. Transcode to PackedBinary (Zero-copy optimization)
+            byte[] packedData = com.turbomc.nbt.NBTConverter.toPackedBinary(optimizedTag).toBytes();
+            
+            // 3. Delegation to Storage Manager - Use Direct Save (Already owned)
+            TurboStorageManager.getInstance().saveChunkDirect(filePath, chunkPos.x, chunkPos.z, packedData, false);
+            
+            // 4. Update header metadata for fast exists-check
+            header.setChunkData(chunkPos.x & 31, chunkPos.z & 31, -1, packedData.length);
+        } catch (Exception e) {
+            throw new IOException("High-performance write failed for " + chunkPos, e);
+        }
+    }
+
     private void writeChunk(ChunkPos chunkPos, byte[] nbtData) throws IOException {
         // Use Global TurboStorageManager for EVERYTHING.
         // This ensures writes are batched, compressed correctly, and integrity-validated.

@@ -196,68 +196,70 @@ public class LRFRegionWriter implements AutoCloseable {
      */
     public void writeChunkStreaming(LRFChunkEntry chunk) throws IOException {
         long startTime = System.nanoTime();
-        
-        // FIX #2: Removed duplicate getData() call
-        byte[] dataToWrite = chunk.getData();
-        
-        // Track if we had to fall back to uncompressed
-        int actualCompressionType = compressionType;
-        
-        // Compress if needed with error handling
-        byte[] compressedData;
-        if (compressionType == LRFConstants.COMPRESSION_NONE) {
-            compressedData = dataToWrite;
-        } else {
-            try {
-                compressedData = TurboCompressionService.getInstance().compress(dataToWrite);
-            } catch (com.turbomc.compression.CompressionException e) {
-                // FIX #5: Update compression type when falling back to uncompressed
-                System.err.println("[TurboMC][LRF] Compression failed for chunk (" + 
-                    chunk.getChunkX() + "," + chunk.getChunkZ() + "): " + e.getMessage() + 
-                    ". Using uncompressed data.");
-                compressedData = dataToWrite;
-                actualCompressionType = LRFConstants.COMPRESSION_NONE;
-            }
-        }
-        
-        // Fase 4: StampedLock optimization - replace synchronized blocks
-        long currentPos;
-        long stamp = headerLock.tryOptimisticRead();
-        
+        com.turbomc.util.BufferPool pool = com.turbomc.util.BufferPool.getInstance();
+        byte[] rawData = chunk.getData();
+        byte[] dataToCompress = pool.acquire(rawData.length + 8);
+        long stamp = 0;
+
         try {
-            // Try optimistic read first
-            currentPos = channel.position();
-            if (!headerLock.validate(stamp)) {
-                // Fallback to read lock
-                stamp = headerLock.readLock();
+            System.arraycopy(rawData, 0, dataToCompress, 0, rawData.length);
+            long ts = chunk.getTimestamp();
+            dataToCompress[rawData.length]     = (byte) (ts >>> 56);
+            dataToCompress[rawData.length + 1] = (byte) (ts >>> 48);
+            dataToCompress[rawData.length + 2] = (byte) (ts >>> 40);
+            dataToCompress[rawData.length + 3] = (byte) (ts >>> 32);
+            dataToCompress[rawData.length + 4] = (byte) (ts >>> 24);
+            dataToCompress[rawData.length + 5] = (byte) (ts >>> 16);
+            dataToCompress[rawData.length + 6] = (byte) (ts >>> 8);
+            dataToCompress[rawData.length + 7] = (byte) ts;
+            
+            chunk.release();
+
+            int actualCompressionType = compressionType;
+            byte[] compressedData;
+            
+            if (compressionType == LRFConstants.COMPRESSION_NONE) {
+                compressedData = new byte[rawData.length + 8];
+                System.arraycopy(dataToCompress, 0, compressedData, 0, compressedData.length);
+            } else {
                 try {
-                    currentPos = channel.position();
-                } finally {
-                    headerLock.unlockRead(stamp);
+                    compressedData = TurboCompressionService.getInstance().compress(dataToCompress, 0, rawData.length + 8);
+                } catch (Exception e) {
+                    System.err.println("[TurboMC][LRF] Compression failed for " + chunk.getChunkX() + "," + chunk.getChunkZ() + ": " + e.getMessage());
+                    compressedData = new byte[rawData.length + 8];
+                    System.arraycopy(dataToCompress, 0, compressedData, 0, compressedData.length);
+                    actualCompressionType = LRFConstants.COMPRESSION_NONE;
                 }
             }
-            
-            // Check alignment and padding
-            if (currentPos % 256 != 0) {
-                long alignedPos = (currentPos / 256 + 1) * 256;
-                int paddingSize = (int)(alignedPos - currentPos);
-                byte[] padding = new byte[paddingSize];
-                channel.write(ByteBuffer.wrap(padding));
-                currentPos = alignedPos;
+        
+            long currentPos;
+            stamp = headerLock.readLock(); // Simplification: Use read lock instead of optimistic for sequential write coordination
+            try {
+                currentPos = channel.position();
+                
+                // Check alignment and padding
+                if (currentPos % 256 != 0) {
+                    long alignedPos = (currentPos / 256 + 1) * 256;
+                    int paddingSize = (int)(alignedPos - currentPos);
+                    byte[] padding = new byte[paddingSize];
+                    channel.write(ByteBuffer.wrap(padding));
+                    currentPos = alignedPos;
+                }
+                
+                if (currentPos < LRFConstants.HEADER_SIZE) {
+                    int paddingSize = (int)(LRFConstants.HEADER_SIZE - currentPos);
+                    byte[] padding = new byte[paddingSize];
+                    channel.write(ByteBuffer.wrap(padding));
+                    currentPos = LRFConstants.HEADER_SIZE;
+                }
+            } finally {
+                headerLock.unlockRead(stamp);
+                stamp = 0;
             }
             
-            if (currentPos < LRFConstants.HEADER_SIZE) {
-                int paddingSize = (int)(LRFConstants.HEADER_SIZE - currentPos);
-                byte[] padding = new byte[paddingSize];
-                channel.write(ByteBuffer.wrap(padding));
-                currentPos = LRFConstants.HEADER_SIZE;
-            }
-            
-            // Upgrade to write lock for header modifications
+            // Upgrade to write lock for header modifications and channel write
             stamp = headerLock.writeLock();
             try {
-                com.turbomc.util.BufferPool pool = com.turbomc.util.BufferPool.getInstance();
-                
                 // Write length header (5 bytes: 4 length + 1 compression type)
                 int totalLength = 4 + 1 + compressedData.length;
                 byte[] lengthHeader = pool.acquire(5);
@@ -275,7 +277,7 @@ public class LRFRegionWriter implements AutoCloseable {
                 // Write chunk data with buffer
                 writeWithBuffer(compressedData);
                 
-                // Update streaming header (now inside write lock)
+                // Update streaming header
                 streamingHeader.setChunkData(
                     chunk.getChunkX(),
                     chunk.getChunkZ(),
@@ -284,13 +286,15 @@ public class LRFRegionWriter implements AutoCloseable {
                 );
             } finally {
                 headerLock.unlockWrite(stamp);
+                stamp = 0;
             }
         } catch (IOException e) {
-            // Ensure lock is released on IOException
-            if (StampedLock.isWriteLockStamp(stamp)) {
+            if (stamp != 0 && StampedLock.isWriteLockStamp(stamp)) {
                 headerLock.unlockWrite(stamp);
             }
             throw e;
+        } finally {
+            pool.release(dataToCompress);
         }
         
         // Update statistics
@@ -298,6 +302,84 @@ public class LRFRegionWriter implements AutoCloseable {
         compressionTime.addAndGet(System.nanoTime() - startTime);
         
         // Reset headerWritten flag when adding new data after a flush
+        headerWritten = false;
+    }
+
+    /**
+     * Add a chunk that is already compressed.
+     * Prevents double-compression when using ChunkBatchSaver.
+     * 
+     * @param chunkX Chunk X coordinate
+     * @param chunkZ Chunk Z coordinate
+     * @param compressedData The fully compressed chunk data (including timestamp)
+     */
+    public void addCompressedChunk(int chunkX, int chunkZ, byte[] compressedData) throws IOException {
+        if (!streamingMode) {
+             throw new UnsupportedOperationException("Compressed chunks only supported in streaming mode");
+        }
+
+        long stamp = 0;
+        try {
+             long currentPos;
+             stamp = headerLock.readLock();
+             try {
+                 currentPos = channel.position();
+                 
+                 // Check alignment and padding
+                 if (currentPos % 256 != 0) {
+                     long alignedPos = (currentPos / 256 + 1) * 256;
+                     int paddingSize = (int)(alignedPos - currentPos);
+                     byte[] padding = new byte[paddingSize];
+                     channel.write(ByteBuffer.wrap(padding));
+                     currentPos = alignedPos;
+                 }
+                 
+                 if (currentPos < LRFConstants.HEADER_SIZE) {
+                     int paddingSize = (int)(LRFConstants.HEADER_SIZE - currentPos);
+                     byte[] padding = new byte[paddingSize];
+                     channel.write(ByteBuffer.wrap(padding));
+                     currentPos = LRFConstants.HEADER_SIZE;
+                 }
+             } finally {
+                 headerLock.unlockRead(stamp);
+                 stamp = 0;
+             }
+             
+             // Upgrade to write lock for header modifications and channel write
+             stamp = headerLock.writeLock();
+             try {
+                 // Write length header (5 bytes: 4 length + 1 compression type)
+                 int totalLength = 4 + 1 + compressedData.length;
+                 // Use basic allocation for small header to avoid pool overhead/contention
+                 ByteBuffer lengthBuffer = ByteBuffer.allocate(5);
+                 lengthBuffer.putInt(totalLength);
+                 lengthBuffer.put((byte) compressionType);
+                 lengthBuffer.flip();
+                 channel.write(lengthBuffer);
+                 
+                 // Write chunk data with buffer
+                 writeWithBuffer(compressedData);
+                 
+                 // Update streaming header
+                 streamingHeader.setChunkData(
+                     chunkX,
+                     chunkZ,
+                     (int) currentPos,
+                     totalLength
+                 );
+             } finally {
+                 headerLock.unlockWrite(stamp);
+                 stamp = 0;
+             }
+        } catch (IOException e) {
+            if (stamp != 0 && StampedLock.isWriteLockStamp(stamp)) {
+                headerLock.unlockWrite(stamp);
+            }
+            throw e;
+        }
+        
+        // Update statistics (approximate)
+        chunksCompressed.incrementAndGet(); 
         headerWritten = false;
     }
     

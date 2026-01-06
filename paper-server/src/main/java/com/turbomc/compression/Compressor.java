@@ -6,14 +6,18 @@ package com.turbomc.compression;
  */
 public interface Compressor {
     
+    byte[] compress(byte[] data) throws CompressionException;
+
     /**
-     * Compress raw data.
+     * Compress raw data from a specific offset and length.
      *
      * @param data Raw bytes to compress
+     * @param offset Starting offset in the array
+     * @param length Number of bytes to compress
      * @return Compressed bytes
      * @throws CompressionException if compression fails
      */
-    byte[] compress(byte[] data) throws CompressionException;
+    byte[] compress(byte[] data, int offset, int length) throws CompressionException;
     
     /**
      * Decompress compressed data.

@@ -73,13 +73,25 @@ public class TurboCompressionService {
      * @throws CompressionException if compression fails and fallback is disabled
      */
     public byte[] compress(byte[] data) throws CompressionException {
-        if (data == null || data.length == 0) {
+        return compress(data, 0, data != null ? data.length : 0);
+    }
+    
+    /**
+     * Compress data from a specific offset and length.
+     *
+     * @param data Raw data to compress
+     * @param offset Starting offset
+     * @param length Number of bytes
+     * @return Compressed data
+     */
+    public byte[] compress(byte[] data, int offset, int length) throws CompressionException {
+        if (data == null || length == 0) {
             return new byte[0];
         }
         
         try {
             // Compress using primary
-            byte[] compressed = primaryCompressor.compress(data);
+            byte[] compressed = primaryCompressor.compress(data, offset, length);
             compressionCount.incrementAndGet();
             compressedBytes.addAndGet(compressed.length);
             return compressed;
@@ -90,7 +102,7 @@ public class TurboCompressionService {
             if (fallbackEnabled) {
                 try {
                     System.out.println("[TurboMC] Trying fallback compression...");
-                    byte[] fallbackCompressed = fallbackCompressor.compress(data);
+                    byte[] fallbackCompressed = fallbackCompressor.compress(data, offset, length);
                     compressionCount.incrementAndGet();
                     compressedBytes.addAndGet(fallbackCompressed.length);
                     fallbackCount.incrementAndGet();
@@ -101,7 +113,6 @@ public class TurboCompressionService {
                 }
             }
             
-            // If no fallback or fallback failed, throw exception
             throw new CompressionException("Compression failed: " + e.getMessage(), e);
         }
     }

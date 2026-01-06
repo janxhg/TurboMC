@@ -42,7 +42,7 @@ public final class TurboCommandRegistry {
         TurboStorageCommand.register(dispatcher);
         
         // Register inspector commands
-        TurboInspectorCommand.register(dispatcher);
+        // TurboInspectorCommand.register(dispatcher);
         
         // Register stress test command
         TurboStressTestCommand.register(dispatcher);

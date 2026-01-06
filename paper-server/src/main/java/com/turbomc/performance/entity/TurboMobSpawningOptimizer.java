@@ -332,6 +332,23 @@ public class TurboMobSpawningOptimizer implements TurboOptimizerModule {
     }
 
     /**
+     * Update mob counts from the current spawn state
+     */
+    public void updateFromSpawnState(net.minecraft.server.level.ServerLevel level, net.minecraft.world.level.NaturalSpawner.SpawnState spawnState) {
+        if (!enabled) return;
+        
+        String worldKey = level.dimension().location().toString();
+        int totalMobCount = 0;
+        
+        for (net.minecraft.world.entity.MobCategory category : net.minecraft.world.entity.MobCategory.values()) {
+            totalMobCount += spawnState.getMobCategoryCounts().getInt(category);
+        }
+        
+        worldMobCounts.put(worldKey, totalMobCount);
+        metrics.get("world_mob_counts").update(totalMobCount);
+    }
+
+    /**
      * Update mob count for world
      */
     public void updateWorldMobCount(String worldKey, int count) {

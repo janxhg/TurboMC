@@ -11,6 +11,7 @@ plugins {
     idea
     id("io.papermc.paperweight.core")
     id("io.papermc.fill.gradle") version "1.0.9"
+    id("me.champeau.jmh") version "0.7.2"
 }
 
 val paperMavenPublicUrl = "https://repo.papermc.io/repository/maven-public/"
@@ -36,6 +37,10 @@ dependencies {
     // TurboMC - ViaVersion Multi-Version Support (v1.6.0 - STABLE 4.9.0)
     implementation("com.viaversion:viaversion-common:4.9.0")
     implementation("com.viaversion:viabackwards-common:4.9.0")
+
+    // JMH Benchmarking
+    testImplementation("org.openjdk.jmh:jmh-core:1.37")
+    testAnnotationProcessor("org.openjdk.jmh:jmh-generator-annprocess:1.37")
 }
 
 paperweight {
@@ -418,3 +423,13 @@ tasks.named<CreateBundlerJar>("createReobfBundlerJar") {
 }
 
 
+// JMH Benchmarking configuration
+// JMH Benchmarking configuration
+jmh {
+    duplicateClassesStrategy = DuplicatesStrategy.EXCLUDE
+    // include = listOf(".*") // Optional: filter benchmarks
+}
+
+tasks.withType<Zip>().configureEach {
+    isZip64 = true
+}

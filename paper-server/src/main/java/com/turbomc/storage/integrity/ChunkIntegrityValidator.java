@@ -382,9 +382,30 @@ public class ChunkIntegrityValidator implements AutoCloseable {
     }
     
     /**
-     * Calculate checksums for chunk data using configured algorithms.
+     * Update checksum directly with a pre-calculated value.
+     * Use this to avoid race conditions with buffer reuse.
      */
-    private ChunkChecksum calculateChecksums(int chunkX, int chunkZ, byte[] data) {
+    public void updateChecksum(ChunkChecksum newChecksum) {
+        if (newChecksum == null) return;
+        
+        int chunkIndex = LRFConstants.getChunkIndex(newChecksum.getChunkX(), newChecksum.getChunkZ());
+        
+        synchronized (checksums) {
+            ChunkChecksum old = checksums.put(chunkIndex, newChecksum);
+            if (old != null) {
+                checksumStorageSize.addAndGet(estimateChecksumSize(newChecksum) - estimateChecksumSize(old));
+            } else {
+                checksumStorageSize.addAndGet(estimateChecksumSize(newChecksum));
+            }
+        }
+        lastValidationTime.put(chunkIndex, System.currentTimeMillis());
+    }
+
+    /**
+     * Calculate checksums for chunk data using configured algorithms.
+     * Made public to allow pre-calculation in safe contexts (e.g. compression threads).
+     */
+    public ChunkChecksum calculateChecksums(int chunkX, int chunkZ, byte[] data) {
         String primaryChecksum = calculateChecksum(data, primaryAlgorithm);
         String backupChecksum = backupAlgorithm != null ? 
             calculateChecksum(data, backupAlgorithm) : null;

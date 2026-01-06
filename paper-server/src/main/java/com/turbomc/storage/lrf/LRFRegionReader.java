@@ -32,7 +32,7 @@ public class LRFRegionReader implements AutoCloseable {
     private final SharedRegionResource sharedResource;
     
     // Concurrent cache for raw bytes (decompressed)
-    private final java.util.concurrent.ConcurrentHashMap<Integer, byte[]> chunkCache;
+    private final java.util.Map<Integer, byte[]> chunkCache;
     // Removed cacheLock - ConcurrentHashMap handles its own concurrency
     
     // FIXED: Memory usage tracking for cache
@@ -75,7 +75,16 @@ public class LRFRegionReader implements AutoCloseable {
         this.header = readInternalHeader();
         
         // Initialize stats
-        this.chunkCache = new java.util.concurrent.ConcurrentHashMap<>();
+        this.chunkCache = java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<Integer, byte[]>(128, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(java.util.Map.Entry<Integer, byte[]> eldest) {
+                if (currentCacheSize.get() > MAX_CACHE_MEMORY) {
+                    currentCacheSize.addAndGet(-eldest.getValue().length);
+                    return true;
+                }
+                return false;
+            }
+        });
         this.cacheHits = new AtomicLong(0);
         this.cacheMisses = new AtomicLong(0);
     }
@@ -98,7 +107,16 @@ public class LRFRegionReader implements AutoCloseable {
         this.header = readInternalHeader();
         
         // Initialize stats
-        this.chunkCache = new java.util.concurrent.ConcurrentHashMap<>();
+        this.chunkCache = java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<Integer, byte[]>(128, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(java.util.Map.Entry<Integer, byte[]> eldest) {
+                if (currentCacheSize.get() > MAX_CACHE_MEMORY) {
+                    currentCacheSize.addAndGet(-eldest.getValue().length);
+                    return true;
+                }
+                return false;
+            }
+        });
         this.cacheHits = new AtomicLong(0);
         this.cacheMisses = new AtomicLong(0);
     }
@@ -246,8 +264,26 @@ public class LRFRegionReader implements AutoCloseable {
                     }
                 }
                 
-                // ... cache logic follows ...
-                return finalizeChunkRead(chunkX, chunkZ, chunkIndex, data);
+                // FIXED: Extract timestamp (last 8 bytes) and strip from data
+                if (data.length < 8) {
+                    System.err.println("[TurboMC][LRF][ERROR] Chunk data too short (no timestamp) for (" + chunkX + "," + chunkZ + ")");
+                    return null;
+                }
+                
+                int actualDataSize = data.length - 8;
+                long timestamp = 0;
+                for (int i = 0; i < 8; i++) {
+                    timestamp = (timestamp << 8) + (data[actualDataSize + i] & 0xff);
+                }
+                
+                byte[] actualData = new byte[actualDataSize];
+                System.arraycopy(data, 0, actualData, 0, actualDataSize);
+                
+                // Return buffer to pool if it was temporary from decompressor?
+                // TurboCompressionService returns a new array usually, so we let GC handle the 'data' array
+                // 'actualData' is now the clean payload.
+
+                return finalizeChunkRead(chunkX, chunkZ, chunkIndex, actualData, timestamp);
             } finally {
                 pool.release(compressedPayload);
             }
@@ -257,40 +293,17 @@ public class LRFRegionReader implements AutoCloseable {
     }
     
     // New helper to handle the trailing logic of readChunk (cache + finalize)
-    private LRFChunkEntry finalizeChunkRead(int chunkX, int chunkZ, int chunkIndex, byte[] data) {
+    private LRFChunkEntry finalizeChunkRead(int chunkX, int chunkZ, int chunkIndex, byte[] data, long timestamp) {
         if (data == null) return null;
         
-        // FIX: Intelligent batch cache eviction with high watermark
-        // Intelligent batch cache eviction with high watermark
-        // High watermark strategy - keep cache at 90% to avoid constant eviction
-        long highWatermark = (long)(MAX_CACHE_MEMORY * 0.9);
-        
-        // If adding would exceed watermark, batch evict down to 80%
-        if (currentCacheSize.get() + data.length > highWatermark) {
-            long targetSize = (long)(MAX_CACHE_MEMORY * 0.8);
-            long toFree = (currentCacheSize.get() + data.length) - targetSize;
-            
-            // Batch eviction - free multiple entries in one pass
-            long freed = 0;
-            var iterator = chunkCache.entrySet().iterator();
-            
-            while (iterator.hasNext() && freed < toFree) {
-                var entry = iterator.next();
-                byte[] evictedData = entry.getValue();
-                iterator.remove();
-                freed += evictedData.length;
-                currentCacheSize.addAndGet(-evictedData.length);
-            }
-        }
-        
         // Now add if there's space and caching is enabled
-        if (cachingEnabled && currentCacheSize.get() + data.length <= MAX_CACHE_MEMORY) {
-            if (chunkCache.putIfAbsent(chunkIndex, data) == null) {
-                currentCacheSize.addAndGet(data.length);
-            }
+        if (cachingEnabled) {
+            // Update size BEFORE put. If put triggers eviction, size will be reduced in removeEldestEntry.
+            currentCacheSize.addAndGet(data.length);
+            chunkCache.put(chunkIndex, data);
         }
         
-        return createChunkEntry(chunkX, chunkZ, data);
+        return new LRFChunkEntry(chunkX, chunkZ, data, timestamp);
     }
     
     /**
